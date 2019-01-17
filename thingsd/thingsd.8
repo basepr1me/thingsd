@@ -30,7 +30,7 @@ The
 proxy daemon provides a mechanism for clients and client processes to
 communicate with an array of serial and IoT things. At its core,
 .Nm
-is primarily a packet repeater in that it polls for packets to swap between
+is primarily a packet repeater in that it waits for packets to swap between
 subscriber clients and things. However,
 .Nm
 also provides password control over those connections, including client limits.
@@ -52,7 +52,7 @@ This option allows
 to send DEBUG priority messages to syslog.
 .El
 .Pp
-Example things tested: XBee, NF24, ESP8266.
+Example things tested: XBee, NF24, ESP8266, ESP32.
 .Pp
 Subscribers to a thing pass a simple, human-readable packet to
 .Nm .
@@ -65,16 +65,16 @@ Subscription packets must begin with 3 * 0x7E
 ~~~subscribe{
 	{name,"CLIENTNAME"},
 	{things{
-		thing{"dev1","password1"},
-		thing{"dev2","password2"}
+		thing{"dev1","pass"},
+		thing{"dev2","pass"}
 		}
 	}
 }
 .Ed
 .Pp
-An accurate example packet:
+An accurate example packet without linebreaks:
 .Bd -literal -offset indent
-~~~subscribe{{name,"CLIENTNAME"},{things{thing{"dev1","password1"}}}}
+~~~subscribe{{name,"CLIENTNAME"},{things{thing{"dev1","pass"}}}}
 .Ed
 .Pp
 .Nm
@@ -108,13 +108,15 @@ Socket file for communication with
 .Xr thingsctl 8 ,
 .Xr rc 8 ,
 .Xr rc.conf 8
-.Sh STANDARDS
-.Rs
-.Re
 .Sh HISTORY
 The busybeed program first began development on
 .Ox 5.9 . The
 .Nm
 program refactoring and rename began on
 .Ox 6.4 . thingsd name by Matthew Graybosch .
-
+.Sh AUTHORS
+.An -nosplit
+The
+.Xr thingsd 8
+program was written by
+.An Tracey Emery Aq Mt tracey@traceyemery.net .

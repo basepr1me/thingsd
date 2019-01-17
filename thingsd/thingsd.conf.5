@@ -18,7 +18,7 @@
 .Os
 .Sh NAME
 .Nm thingsd.conf
-.Nd thingsd daemon configuration file
+.Nd thingsd proxy daemon configuration file
 .Sh DESCRIPTION
 .Nm
 is the configuration file for the things proxy daemon,
@@ -68,11 +68,11 @@ seconds. Range is 30-600 seconds.
 .It Ic log verbose Ar number
 Turn on verbose logging. (This option is currently disabled.)
 .El
-.Sh thingS
+.Sh THINGS
 things represent a serial thing or a TCP/IP host for
 .Xr thingsd 8
 to communicate with.
-.Xr thingsd 8 
+.Xr thingsd 8
 will setup sockets and bind to things depending on the settings for each
 thing.
 .Bl -tag -width Ds
@@ -103,16 +103,14 @@ will use for client subscriptions.
 .It Ic hardware Ar number
 Set to 1 to turn on hardware control for a serial thing
 .Ar location .
-OpenBSD doesn't use this. It's commented out in
-.Xr thingsd 8 .
 .It Ic ipaddr Ar string Brq ...
 Create a
 .Ar thing
-connection to an IPV4 hostname or IP address. IPV6 is not implemented yet.
+connection to a hostname or IP address.
 .It Ic listen on port Ar number
 Set a local socket port for a
-.Ar location , 
-.Ar udp , 
+.Ar location ,
+.Ar udp ,
 or
 .Ar ipaddr
 thing, other than the global default port.
@@ -120,7 +118,8 @@ thing, other than the global default port.
 Create a
 .Ar thing
 connection to serial interface. These are any valid /dev things, for example
-/dev/ttyU0.
+/dev/ttyU0. Set the owner of a thing to _thingsd to allow for autoreconnect in
+a privdrop environment, in the event of a serial thing disconnect.
 .It Ic max clients Ar number
 Set the maximum clients allowed to connect to a thing
 .Ar location
@@ -164,13 +163,6 @@ Set the stop bit for a serial thing
 Create a
 .Ar thing
 which listens for user datagram protocol packets.
-
-.El
-.Sh FILES
-.Bl -tag -width Ds -compact
-.It Pa /etc/thingsd.conf
-.Xr thingsd 8
-configuration file.
 .El
 .Sh EXAMPLES
 This configuration file would create a serial thing and a TCP/IP host thing.
@@ -216,25 +208,22 @@ thing "udp_thing" {
 }
 .Ed
 .Pp
+.El
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa /etc/thingsd.conf
+.Xr thingsd 8 configuration file.
 .Sh SEE ALSO
 .Xr thingsctl 8 ,
 .Xr thingsd 8
 .Sh HISTORY
 The
 .Nm
-file format first appeared with busybeed developed on
+file format first appeared with busybeed development on
 .Ox 5.9 .
 .Sh AUTHORS
 .An -nosplit
 The
 .Xr thingsd 8
 program was written by
-.An Tracey Emery Aq Mt tracey@traceyemery.com ,
-with extensive reading and perusing of
-.Xr ntpd 8
-and
-.Xr relayd 8 .
-Thank you to the real programmers who came before me.
-.Sh CAVEATS
-.Xr thingsd 8
-None yet.
+.An Tracey Emery Aq Mt tracey@traceyemery.net .
