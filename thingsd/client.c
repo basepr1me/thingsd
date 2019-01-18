@@ -139,23 +139,23 @@ clt_rd(struct bufferevent *bev, void *arg)
 	}
 	clt->evb = EVBUFFER_INPUT(bev);
 	len = EVBUFFER_LENGTH(clt->evb);
-	if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
-		return;
 	if (clt->subscribed == false) {
 		/* allow one shot at subscription so we don't get hammered */
+		if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
+			return;
+		if ((npkt = calloc(len, sizeof(*npkt))) == NULL)
+			return;
 		bufferevent_disable(clt->bev, EV_READ);
 		evbuffer_remove(clt->evb, pkt, len);
 		/* peak into packet and ensure it's a subscription packet */
 		if (pkt[0] == 0x7E && pkt[1] == 0x7E && pkt[2] == 0x7E) {
-			if ((npkt = calloc(len, sizeof(*npkt))) == NULL)
-				return;
 			memmove(npkt, pkt+3, len-3);
 			parse_buf(clt, npkt, len-3);
-			free(pkt);
-			free(npkt);
 			if (clt->subscribed)
 				bufferevent_enable(clt->bev, EV_READ|EV_WRITE);
 		}
+		free(pkt);
+		free(npkt);
 	} else if (clt->subscribed) {
 		/* write to thgs */
 		for (n = 0; n < clt->le; n++) {
@@ -169,7 +169,6 @@ clt_rd(struct bufferevent *bev, void *arg)
 				}
 			}
 		}
-		free(pkt);
 	}
 }
 
