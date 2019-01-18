@@ -140,7 +140,6 @@ subthgs		: THING '{' STRING ',' STRING '}' optcomma {
 
 			/* check for duplicate name and subscriptions */
       			TAILQ_FOREACH(clt, &pthgsd->clts, entry) {
-			log_info("%s:%s", clt->name, my_name);
 				if (clt->name == NULL || my_name == NULL)
 					continue;
 				if (strcmp(clt->name, my_name) == 0) {
@@ -457,6 +456,8 @@ lgetc(int quotec)
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of file input */
 		if (parseindex >= 0) {
+			if (parseindex > (int)strlen(parsebuf))
+				return 0;
 			c = parsebuf[parseindex++];
 			if (c != '\0')
 				return(c);
