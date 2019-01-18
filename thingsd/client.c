@@ -23,6 +23,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <tls.h>
 #include <unistd.h>
 
 #include "thingsd.h"
@@ -148,7 +149,6 @@ clt_rd(struct bufferevent *bev, void *arg)
 		if (pkt[0] == 0x7E && pkt[1] == 0x7E && pkt[2] == 0x7E) {
 			memmove(pkt, pkt+3, len+3+1);
 			parse_buf(clt, pkt);
-			free(pkt);
 			if (clt->subscribed)
 				bufferevent_enable(clt->bev, EV_READ|EV_WRITE);
 		}

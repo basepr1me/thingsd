@@ -140,6 +140,9 @@ subthgs		: THING '{' STRING ',' STRING '}' optcomma {
 
 			/* check for duplicate name and subscriptions */
       			TAILQ_FOREACH(clt, &pthgsd->clts, entry) {
+			log_info("%s:%s", clt->name, my_name);
+				if (clt->name == NULL || my_name == NULL)
+					continue;
 				if (strcmp(clt->name, my_name) == 0) {
 					if (my_fd != clt->fd) {
 						fail = true;
@@ -449,15 +452,14 @@ int	 pushback_index = 0;
 int
 lgetc(int quotec)
 {
-	int		c, next;
+	int		c = 0, next;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of file input */
 		if (parseindex >= 0) {
 			c = parsebuf[parseindex++];
 			if (c != '\0')
-				return (c);
-			parsebuf = NULL;
+				return(c);
 		} else
 			parseindex++;
 	}
@@ -769,6 +771,7 @@ parse_buf(struct clt *pclt, u_char *pkt)
 	yyparse();
 	errors = file->errors;
 	popbuff();
+	free(pkt);
 	return (errors ? -1 : 0);
 }
 
