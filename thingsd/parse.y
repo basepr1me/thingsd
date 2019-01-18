@@ -60,7 +60,7 @@ const char			*parity[4] = {"none", "odd", "even", "space"};
 const int			 sparity = (sizeof(parity) /
 				     sizeof(const char *));
 
-int				 bc, pc, my_fd;
+int				 bc, pc, my_fd, pkt_len;
 int				 popfile(void);
 int				 popbuff(void);
 int				 yyparse(void);
@@ -456,11 +456,14 @@ lgetc(int quotec)
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of file input */
 		if (parseindex >= 0) {
-			if (parseindex > (int)strlen(parsebuf))
-				return 0;
+			if (parsebuf == NULL)
+				return(0);
+			if (parseindex > pkt_len)
+				return(0);
 			c = parsebuf[parseindex++];
 			if (c != '\0')
 				return(c);
+			parsebuf = NULL;
 		} else
 			parseindex++;
 	}
@@ -760,10 +763,11 @@ parse_conf(const char *filename)
 }
 
 int
-parse_buf(struct clt *pclt, u_char *pkt)
+parse_buf(struct clt *pclt, u_char *pkt, int len)
 {
 	int		 errors;
 
+	pkt_len = len;
 	tclt = pclt;
 	my_fd = tclt->fd;
 	if ((file = pushbuff(pkt)) == NULL)
@@ -772,7 +776,6 @@ parse_buf(struct clt *pclt, u_char *pkt)
 	yyparse();
 	errors = file->errors;
 	popbuff();
-	free(pkt);
 	return (errors ? -1 : 0);
 }
 

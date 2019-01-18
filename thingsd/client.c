@@ -127,7 +127,7 @@ clt_rd(struct bufferevent *bev, void *arg)
 	struct clt		*clt = NULL, *tclt;
 	size_t			 len, n;
 	int			 fd = bev->ev_read.ev_fd;
-	char			*pkt;
+	char			*pkt, *npkt;
 
 	TAILQ_FOREACH(tclt, &pthgsd->clts, entry) {
 		if (tclt->fd == fd) {
@@ -147,8 +147,12 @@ clt_rd(struct bufferevent *bev, void *arg)
 		evbuffer_remove(clt->evb, pkt, len);
 		/* peak into packet and ensure it's a subscription packet */
 		if (pkt[0] == 0x7E && pkt[1] == 0x7E && pkt[2] == 0x7E) {
-			memmove(pkt, pkt+3, len+3+1);
-			parse_buf(clt, pkt);
+			if ((npkt = calloc(len, sizeof(*npkt))) == NULL)
+				return;
+			memmove(npkt, pkt+3, len-3);
+			parse_buf(clt, npkt, len-3);
+			free(pkt);
+			free(npkt);
 			if (clt->subscribed)
 				bufferevent_enable(clt->bev, EV_READ|EV_WRITE);
 		}

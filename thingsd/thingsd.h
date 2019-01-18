@@ -142,7 +142,7 @@ void				 add_reconn(struct thg *);
 /* parse.y */
 struct thg			*new_thg(char *);
 int				 parse_conf(const char *);
-int				 parse_buf(struct clt *, u_char *);
+int				 parse_buf(struct clt *, u_char *, int);
 
 /* serial.c */
 void				 open_thgs(struct thgsd *, bool);
