@@ -18,31 +18,49 @@
 .Os
 .Sh NAME
 .Nm thingsd
-.Nd things proxy daemon
+.Nd things OpenBSD proxy daemon
 .Sh SYNOPSIS
 .Nm thingsd
 .Bk -words
-.Op Fl d
+.Op Fl dv
 .Ek
 .Sh DESCRIPTION
 The
 .Nm
-proxy daemon provides a mechanism for clients and client processes to
-communicate with an array of serial and IoT things. At its core,
+OpenBSD proxy daemon provides a mechanism for clients and client
+processes to communicate with an array of serial and IoT things.
+At its core,
 .Nm
-is primarily a packet repeater in that it waits for packets to swap between
-subscriber clients and things. However,
+is primarily a data aggregator and repeater, in that it waits for
+packets to swap between subscriber clients and things.
+However,
 .Nm
-also provides password control over those connections, including client limits.
+also provides TLS and password control over those connections, including
+client limits.
 .Pp
+On the client side,
 .Nm
-can connect directly to serial things, IoT IP things, and single socket
-connections. It also provides for UDP listeners.
+sets up TCP/IP sockets to transmit packets to and from things.
+On the server side,
+.Nm
+can connect to any serial device which has a viable file descriptor, create a
+persistent connection to the IP address of a device transmitting packets,
+or setup a UDP listener on the network to receive broadcasted packets.
+Devices tested include: ESP8266/ESP32 modules, on both the serial and network
+sides, XBee Series 2 coordinators connected in a mesh network, and NF24
+devices.
+To transmit to an IP address, which does not allow persistence,
+.Nm
+will create an ad hoc connection, transmit a packet, and detach.
+The
+.Nm
+proxy daemon is agnostic about packet data.
 .Pp
 The options are as follows:
 .Bl -tag -width "-f fileXXX"
 .It Fl d
-Do not daemonize. If this option is specified,
+Do not daemonize.
+If this option is specified,
 .Nm
 will run in the foreground and log to
 .Em stderr .
@@ -52,11 +70,9 @@ This option allows
 to send DEBUG priority messages to syslog.
 .El
 .Pp
-Example things tested: XBee, NF24, ESP8266, ESP32.
-.Pp
 Subscribers to a thing pass a simple, human-readable packet to
 .Nm .
-. The format is as follows, without the line breaks and tabs.
+The format is as follows, without the line breaks and tabs.
 This example is only for initial readability and help in understanding
 the format!
 .Pp
@@ -72,10 +88,7 @@ Subscription packets must begin with 3 * 0x7E
 }
 .Ed
 .Pp
-An accurate example packet without linebreaks:
-.Bd -literal -offset indent
-~~~subscribe{{name,"CLIENTNAME"},{things{thing{"dev1","pass"}}}}
-.Ed
+An accurate packet would not include linebreaks.
 .Pp
 .Nm
 is usually started at boot time, and can be enabled by adding
@@ -105,9 +118,9 @@ Socket file for communication with
 .El
 .Sh SEE ALSO
 .Xr thingsd.conf 5 ,
-.Xr thingsctl 8 ,
 .Xr rc 8 ,
-.Xr rc.conf 8
+.Xr rc.conf 8 ,
+.Xr thingsctl 8
 .Sh HISTORY
 The busybeed program first began development on
 .Ox 5.9 . The
@@ -117,6 +130,6 @@ program refactoring and rename began on
 .Sh AUTHORS
 .An -nosplit
 The
-.Xr thingsd 8
+.Nm
 program was written by
 .An Tracey Emery Aq Mt tracey@traceyemery.net .

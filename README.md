@@ -3,9 +3,20 @@ thingsd for OpenBSD
 
 The thingsd OpenBSD proxy daemon provides a mechanism for clients and client
 processes to communicate with an array of serial and IoT things. At its core,
-thingsd is primarily a packet repeater in that it waits for packets to swap
-between subscriber clients and things. However, thingsd also provides password
-control over those connections, including client limits.
+thingsd is primarily a data aggregator and repeater, in that it waits for
+packets to swap between subscriber clients and things. However, thingsd also
+provides password control over those connections, including client limits.
+
+On the client side, thingsd sets up TCP/IP sockets to transmit packets to and
+from things. On the server side, thingsd can connect to any serial device which
+has a viable file descriptor, create a persistent connection to the IP address
+of a device transmitting packets on the same network, or setup a UDP listener
+on the network to receive broadcasted packets. Devices tested include:
+ESP8266/ESP32 modules, on both the serial and network sides, XBee Series 2
+coordinators connected in a mesh network, and NF24 devices. To transmit to an
+IP address, which does not allow persistence, thingsd will create an ad hoc
+connection, transmit a packet, and detach. The thingsd proxy daemon is agnostic
+about packet data.
 
 Prerequisites
 -------------
@@ -50,13 +61,14 @@ Then paste in a subscription packet for your setup:
 
 You should start receiving packets from your setup thing.
 
+See the examples for more testing options.
+
 Further examples can be found in the src/examples directory above.
 
 Todo
 ----
 
 * Finish thingsctl functions
-* Implement TLS
 
 Author
 ------

@@ -28,15 +28,16 @@
 
 #include "thingsd.h"
 
-void
+extern void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t,
+		    size_t, void *);
+
+	void
 clt_conn(int fd, short event, void *arg)
 {
 	struct sockaddr_storage	 ss;
 	struct clt		*clt;
 	struct thgsd		*pthgsd = (struct thgsd *)arg;
 	struct sock		*sock = NULL;
-	evbuffercb		 cltrd = clt_rd;
-	evbuffercb		 cltwr = clt_wr;
 	int			 clt_fd;
 	socklen_t		 len = sizeof(ss);
 
@@ -47,8 +48,18 @@ clt_conn(int fd, short event, void *arg)
 	}
 	if ((clt = calloc(1, sizeof(*clt))) == NULL)
 		goto err;
+	if ((clt->ev = calloc(1, sizeof(*clt->ev))) == NULL)
+		goto err;
 	if ((sock = get_sock(pthgsd, fd)) == NULL)
 		goto err;
+	if (sock->tls) {
+		if (tls_accept_socket(sock->tls_ctx, &clt->tls_ctx, clt_fd)
+		    == -1) {
+			log_info("tls accept failed: %s",
+			    tls_error(sock->tls_ctx));
+			goto err;
+		}
+	}
 	if ((clt->sub_names = (char **)malloc(pthgsd->max_sub *
 	    sizeof(char *))) == NULL)
 		fatalx("no client subscription names malloc");
@@ -65,26 +76,71 @@ clt_conn(int fd, short event, void *arg)
 	clt->sock = sock;
 	clt->subscribed = false;
 	clt->evb = evbuffer_new();
-	if (clt->evb == NULL)
+	if (clt->evb == NULL) {
+		sock->clt_cnt--;
+		pthgsd->clt_cnt--;
 		goto err;
+	}
 	clt->fd = clt_fd;
-	clt->bev = bufferevent_new(clt->fd, cltrd, cltwr, clt_err, pthgsd);
-	if (clt->bev == NULL)
-		goto err;
-	bufferevent_base_set(pthgsd->eb, clt->bev);
-	bufferevent_setwatermark(clt->bev, EV_READ, 0, BUFF);
-	bufferevent_enable(clt->bev, EV_READ);
 	clt->join_time = time(NULL);
-	log_info("client connected");
-	start_clt_chk(pthgsd);
 	TAILQ_INSERT_TAIL(&pthgsd->clts, clt, entry);
+	if (sock->tls) {
+		clt->tls = true;
+		event_del(clt->ev);
+		event_set(clt->ev, clt->fd, EV_READ|EV_PERSIST,
+			    sock_tls_handshake, pthgsd);
+		if (event_add(clt->ev, NULL))
+			goto err;
+		return;
+	}
+	clt_add(pthgsd, clt);
 	return;
  err:
 	log_info("client error");
-	sock->clt_cnt--;
-	pthgsd->clt_cnt--;
 	if (clt_fd != -1) {
 		close(clt_fd);
+		if (sock->tls) {
+			tls_free(clt->tls_ctx);
+			free(clt->ev);
+		}
+		free(clt);
+	}
+}
+
+void
+clt_add(struct thgsd *pthgsd, struct clt *pclt)
+{
+	struct clt		*clt = pclt;
+	struct sock 		*sock = clt->sock;
+	evbuffercb		 cltrd = clt_rd;
+	evbuffercb		 cltwr = clt_wr;
+
+	log_info("client connected");
+	clt->bev = bufferevent_new(clt->fd, cltrd, cltwr, clt_err, pthgsd);
+	if (clt->bev == NULL) {
+		sock->clt_cnt--;
+		pthgsd->clt_cnt--;
+		goto err;
+	}
+	if (clt->tls) {
+		event_set(&clt->bev->ev_read, clt->fd, EV_READ,
+		    clt_tls_readcb, clt->bev);
+		event_set(&clt->bev->ev_write, clt->fd, EV_WRITE,
+		    clt_tls_writecb, clt->bev);
+	}
+	bufferevent_base_set(pthgsd->eb, clt->bev);
+	bufferevent_setwatermark(clt->bev, EV_READ, 0, BUFF);
+	bufferevent_enable(clt->bev, EV_READ);
+	start_clt_chk(pthgsd);
+	return;
+ err:
+	log_info("client error");
+	if (clt->fd != -1) {
+		close(clt->fd);
+		if (sock->tls) {
+			tls_free(clt->tls_ctx);
+			free(clt->ev);
+		}
 		free(clt);
 	}
 }
@@ -98,8 +154,10 @@ clt_del(struct thgsd *pthgsd, struct clt *pclt)
 
 	TAILQ_FOREACH_SAFE(clt, &pthgsd->clts, entry, tclt) {
 		if (clt == pclt) {
-			if (clt->bev != NULL)
-				bufferevent_free(clt->bev);
+			if (clt->tls) {
+				tls_free(clt->tls_ctx);
+				free(clt->ev);
+			}
 			close(clt->fd);
 			for (n = 0; n < clt->le; n++)
 				TAILQ_FOREACH(thg, &pthgsd->thgs, entry)
@@ -113,6 +171,8 @@ clt_del(struct thgsd *pthgsd, struct clt *pclt)
 			else
 				log_info("client disconnected: %s", clt->name);
 			TAILQ_REMOVE(&pthgsd->clts, clt, entry);
+			if (clt->bev != NULL)
+				bufferevent_free(clt->bev);
 			free(clt);
 			break;
 		}
@@ -173,6 +233,59 @@ clt_rd(struct bufferevent *bev, void *arg)
 }
 
 void
+clt_tls_readcb(int fd, short event, void *arg)
+{
+	struct bufferevent	*bufev = (struct bufferevent *)arg;
+	struct thgsd		*pthgsd = bufev->cbarg;
+	struct clt		*clt = NULL, *tclt;
+	char			 pkt[BUFF];
+	ssize_t			 ret;
+	size_t			 len;
+	int			 toread = EVBUFFER_READ;
+
+	TAILQ_FOREACH(tclt, &pthgsd->clts, entry) {
+		if (tclt->fd == fd)
+			clt = tclt;
+	}
+	memset(pkt, 0, sizeof(pkt));
+	ret = tls_read(clt->tls_ctx, pkt, BUFF);
+	if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) {
+		goto retry;
+	} else if (ret < 0) {
+		toread |= EVBUFFER_ERROR;
+		goto err;
+	}
+	len = ret;
+	if (len == 0) {
+		toread |= EVBUFFER_EOF;
+		goto err;
+	}
+	if (evbuffer_add(bufev->input, pkt, len) == -1) {
+		toread |= EVBUFFER_ERROR;
+		goto err;
+	}
+	event_add(&bufev->ev_read, NULL);
+	len = EVBUFFER_LENGTH(bufev->input);
+	if (bufev->wm_read.low != 0 && len < bufev->wm_read.low)
+		return;
+	if (bufev->wm_read.high != 0 && len > bufev->wm_read.high) {
+		struct evbuffer *buf = bufev->input;
+		event_del(&bufev->ev_read);
+		evbuffer_setcb(buf, bufferevent_read_pressure_cb, bufev);
+		return;
+	}
+	if (bufev->readcb != NULL)
+		(*bufev->readcb)(bufev, bufev->cbarg);
+	return;
+ retry:
+	event_del(&bufev->ev_read);
+	event_add(&bufev->ev_read, NULL);
+	return;
+ err:
+	(*bufev->errorcb)(bufev, toread, bufev->cbarg);
+}
+
+void
 clt_wr_thgs(struct clt *clt, struct thg *thg, size_t len)
 {
 	char			*pkt;
@@ -211,6 +324,49 @@ clt_wr_thgs(struct clt *clt, struct thg *thg, size_t len)
 void
 clt_wr(struct bufferevent *bev, void *arg)
 {
+}
+
+void
+clt_tls_writecb(int fd, short event, void *arg)
+{
+	struct bufferevent	*bufev = (struct bufferevent *)arg;
+	struct thgsd		*pthgsd = bufev->cbarg;
+	struct clt		*clt = NULL, *tclt;
+	ssize_t			 ret;
+	size_t			 len;
+	int			 towrite = EVBUFFER_WRITE;
+
+	TAILQ_FOREACH(tclt, &pthgsd->clts, entry) {
+		if (tclt->fd == fd)
+			clt = tclt;
+	}
+	if (EVBUFFER_LENGTH(bufev->output)) {
+		ret = tls_write(clt->tls_ctx,
+		    EVBUFFER_DATA(bufev->output),
+		    EVBUFFER_LENGTH(bufev->output));
+		if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) {
+			goto retry;
+		} else if (ret < 0) {
+			towrite |= EVBUFFER_ERROR;
+			goto err;
+		}
+		len = ret;
+		evbuffer_drain(bufev->output, len);
+	}
+	if (EVBUFFER_LENGTH(bufev->output) != 0) {
+		event_del(&bufev->ev_write);
+		event_add(&bufev->ev_write, NULL);
+	}
+	if (bufev->writecb != NULL && EVBUFFER_LENGTH(bufev->output) <=
+	    bufev->wm_write.low)
+		(*bufev->writecb)(bufev, bufev->cbarg);
+	return;
+ retry:
+	event_del(&bufev->ev_write);
+	event_add(&bufev->ev_write, NULL);
+	return;
+ err:
+	(*bufev->errorcb)(bufev, towrite, bufev->cbarg);
 }
 
 void

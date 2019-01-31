@@ -24,9 +24,11 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <tls.h>
 
 #define PATH_CONF		 "/etc/thingsd.conf"
 #define TH_USER			 "_thingsd"
+#define THINGSD_SOCK		 "/var/run/httpd.sock"
 #define CONN_RTRY		 30
 #define MIN_RTRY		 10
 #define MAX_RTRY		 600
@@ -35,6 +37,17 @@
 #define BUFF			 1024
 #define DTHG_CHK		 2
 #define EB_TIMEOUT		 10
+
+#define TLS_CONFIG_MAX		 511
+#define TLS_CERT		"/etc/ssl/thing.crt"
+#define TLS_KEY			"/etc/ssl/private/thing.key"
+#define TLS_CIPHERS		"compat"
+#define TLS_DHE_PARAMS		"none"
+#define TLS_ECDHE_CURVES	"default"
+#define TLSFLAG_CA		0x01
+#define TLSFLAG_CRL		0x02
+#define TLSFLAG_OPTIONAL	0x04
+#define TLSFLAG_BITS		"\10\01CA\02CRL\03OPTIONAL"
 
 enum socktypes {
 	TCP,
@@ -78,6 +91,28 @@ struct thg {
 	int			 stop_bits;
 	int			 type;
 	size_t			 clt_cnt;
+
+	bool			 tls;
+	uint8_t			 tls_flags;
+	uint8_t			*tls_cert;
+	size_t			 tls_cert_len;
+	char			*tls_cert_file;
+	uint8_t			*tls_key;
+	size_t			 tls_key_len;
+	char			*tls_key_file;
+	uint8_t			*tls_ca;
+	size_t			 tls_ca_len;
+	char			*tls_ca_file;
+	uint8_t			*tls_crl;
+	size_t			 tls_crl_len;
+	char			*tls_crl_file;
+	uint8_t			*tls_ocsp_staple;
+	size_t			 tls_ocsp_staple_len;
+	char			*tls_ocsp_staple_file;
+	char			 tls_ciphers[TLS_CONFIG_MAX];
+	char			 tls_dhe_params[TLS_CONFIG_MAX];
+	char			 tls_ecdhe_curves[TLS_CONFIG_MAX];
+	uint32_t		 tls_protocols;
 };
 
 struct sock {
@@ -90,10 +125,15 @@ struct sock {
 	int			 port;
 	size_t			 clt_cnt;
 	size_t			 max_clts;
+
+	bool			 tls;
+	struct tls_config	*tls_config;
+	struct tls		*tls_ctx;
 };
 
 struct clt {
 	TAILQ_ENTRY(clt)	 entry;
+	struct event		*ev;
 	struct evbuffer		*evb;
 	struct bufferevent	*bev;
 	struct sock		*sock;
@@ -105,6 +145,9 @@ struct clt {
 	time_t			 join_time;
 	size_t			 le;
 	size_t			 subs;
+
+	bool			 tls;
+	struct tls		*tls_ctx;
 };
 
 struct thgsd {
@@ -166,6 +209,7 @@ void				 udp_evt(int, short, void *);
 
 /* client.c */
 void				 clt_conn(int, short, void *);
+void				 clt_add(struct thgsd *, struct clt *);
 void				 clt_del(struct thgsd *, struct clt *);
 void				 clt_rd(struct bufferevent *, void *);
 void				 clt_wr(struct bufferevent *, void *);
@@ -175,6 +219,16 @@ void				*clt_chk(void *);
 void				 clt_do_chk(struct thgsd *);
 void				 clt_wr_thgs(struct clt *, struct thg *,
 				    size_t);
+void				 clt_tls_readcb(int, short, void *);
+void				 clt_tls_writecb(int, short, void *);
+
+/* tls.c */
+int				 tls_load_keypair(struct thg *);
+int				 tls_load_ca(struct thg *);
+int				 tls_load_crl(struct thg *);
+int				 tls_load_ocsp(struct thg *);
+int				 sock_tls_init(struct sock *, struct thg *);
+void				 sock_tls_handshake(int, short, void *);
 
 /* log.c */
 void	log_init(int, int);

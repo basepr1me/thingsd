@@ -241,7 +241,12 @@ thingsd_shutdown(struct dthgs *zdthgs)
 	}
 	/* clean up sockets */
 	TAILQ_FOREACH_SAFE(sock, &pthgsd->socks, entry, tsock) {
+		if (sock->tls) {
+			tls_config_free(sock->tls_config);
+			tls_free(sock->tls_ctx);
+		}
 		close(sock->fd);
+		free(sock->ev);
 		TAILQ_REMOVE(&pthgsd->socks, sock, entry);
 		free(sock);
 	}
@@ -253,7 +258,7 @@ thingsd_shutdown(struct dthgs *zdthgs)
 		free(clt);
 	}
 	log_info("%s terminated", progname);
-	event_base_free(pthgsd->eb);
+	/* event_base_free(pthgsd->eb); */
 	free(pdthgs);
 	free(pthgsd);
 	exit(0);

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2016-2019 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2007 - 2015 Reyk Floeter <reyk@openbsd.org>
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
  * Copyright (c) 2001 Daniel Hartmeier.  All rights reserved.
@@ -74,6 +75,7 @@ int				 lookup(char *);
 int				 lgetc(int);
 int				 lungetc(int);
 int				 findeol(void);
+int				 load_tls(struct thg *);
 
 size_t				 n;
 
@@ -90,10 +92,12 @@ typedef struct {
 
 %token	BAUD DATA PARITY STOP HARDWARE SOFTWARE PASSWORD NAME RETRY PERSISTENT
 %token	LOG VERBOSE CONNECT THING LISTEN LOCATION IPADDR UDP THINGS CONNECTION
-%token	DEFAULT PORT MAX CLIENTS SUBSCRIPTIONS BIND INTERFACE SUBSCRIBE ERROR
-%token	RECEIVE
+%token	DEFAULT PORT MAX CLIENTS SUBSCRIPTIONS BIND INTERFACE SUBSCRIBE TLS
+%token	ERROR RECEIVE CERTIFICATE CIPHERS CLIENT CA CRL OPTIONAL DHE ECDHE KEY
+%token	OCSP PROTOCOLS ON
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
+%type	<v.number>		opttls
 
 %%
 grammar		: /* empty */
@@ -101,6 +105,15 @@ grammar		: /* empty */
 		| grammar main '\n'
 		| grammar dosub
 		| grammar error '\n' { file->errors++; }
+		;
+opttls		: /*empty*/ {
+			$$ = 0;
+			newthg->tls = false;
+		}
+		| TLS {
+			$$ = 1;
+			newthg->tls = true;
+		}
 		;
 main		: DEFAULT PORT NUMBER {
 			pthgsd->port = $3;
@@ -169,8 +182,8 @@ subthgs		: THING '{' STRING ',' STRING '}' optcomma {
 					if (strcmp(thg->password, $5) == 0) {
 						if (clt->subs++ >=
 						    pthgsd->max_sub) {
-						    	log_info("max " \
-							    "subscriptions " \
+						    	log_info("max "
+							    "subscriptions "
 							    "reached");
 							continue;
 						}
@@ -179,16 +192,13 @@ subthgs		: THING '{' STRING ',' STRING '}' optcomma {
 						    = thg->name;
 						clt->le++;
 						thg->clt_cnt++;
-						log_info("client %s subscribed" \
-						    " to %s", clt->name,
+						log_info("client %s subscribed "
+						    "to %s", clt->name,
 						    thg->name);
 						continue;
 					}
 			}
 		}
-		;
-optcomma	: ',' optcomma
-		| /* emtpy */
 		;
 logging		: LOG VERBOSE NUMBER {
 	 		if (pthgsd->debug == 0)
@@ -226,8 +236,16 @@ locopts		: /* empty */
 locopts2	: locopts2 locopts1 nl
 		| locopts1 optnl
 		;
-locopts1	: LISTEN STRING PORT NUMBER {
-	 		newthg->port = $4;
+locopts1	: LISTEN ON opttls PORT NUMBER {
+			struct thg		*thg;
+
+			TAILQ_FOREACH(thg, &pthgsd->thgs, entry) {
+				if (thg->port == $5 && (thg->tls || $3)) {
+					yyerror("tls port already used");
+					YYERROR;
+				}
+			}
+	 		newthg->port = $5;
 		}
 		| BAUD NUMBER {
 			newthg->baud = -1;
@@ -283,25 +301,43 @@ locopts1	: LISTEN STRING PORT NUMBER {
 				newthg->sw_ctl = true;
 		}
 		| PASSWORD STRING {
-			newthg->password = $2;
+			if ((newthg->password = strdup($2)) == NULL)
+				fatal("out of memory");
+			free($2);
 		}
 		| bindopts2
 		| maxclientssub
+		| TLS tlsopts {
+			if (newthg->tls == false) {
+				yyerror("tls options without tls listener");
+				YYERROR;
+			}
+		}
 		;
 socopts2	: socopts2 socopts1 nl
 		| socopts1 optnl
 		;
-socopts1	: LISTEN STRING PORT NUMBER {
-			newthg->port = $4;
+socopts1	: LISTEN ON opttls PORT NUMBER {
+			struct thg		*thg;
+
+			TAILQ_FOREACH(thg, &pthgsd->thgs, entry) {
+				if (thg->port == $5 && (thg->tls || $3)) {
+					yyerror("tls port already used");
+					YYERROR;
+				}
+			}
+			newthg->port = $5;
 		}
-		| CONNECT STRING PORT NUMBER {
+		| CONNECT ON PORT NUMBER {
 			newthg->conn_port = $4;
 		}
 		| RECEIVE STRING PORT NUMBER {
 			newthg->conn_port = $4;
 		}
 		| PASSWORD STRING {
-			newthg->password = $2;
+			if ((newthg->password = strdup($2)) == NULL)
+				fatal("out of memory");
+			free($2);
 		}
 		| PERSISTENT NUMBER {
 			if ($2)
@@ -311,6 +347,12 @@ socopts1	: LISTEN STRING PORT NUMBER {
 		}
 		| bindopts2
 		| maxclientssub
+		| TLS tlsopts {
+			if (newthg->tls == false) {
+				yyerror("tls options without tls listener");
+				YYERROR;
+			}
+		}
 		;
 thingopts2	: thingopts2 thingopts1 nl
 		| thingopts1 optnl
@@ -340,8 +382,21 @@ thing		: THING STRING	 {
 			newthg->stop_bits = -1;
 			newthg->hw_ctl = false;
 			newthg->sw_ctl = false;
-			newthg->password = "";
 			newthg->persist = true;
+			newthg->password = "";
+
+			newthg->tls_protocols = TLS_PROTOCOLS_DEFAULT;
+			newthg->tls_flags = 0;
+			if ((newthg->tls_cert_file = strdup(TLS_CERT)) == NULL)
+				fatal("out of memory");
+			if ((newthg->tls_key_file = strdup(TLS_KEY)) == NULL)
+				fatal("out of memory");
+			strlcpy(newthg->tls_ciphers, TLS_CIPHERS,
+			    sizeof(newthg->tls_ciphers));
+			strlcpy(newthg->tls_dhe_params, TLS_DHE_PARAMS,
+			    sizeof(newthg->tls_dhe_params));
+			strlcpy(newthg->tls_ecdhe_curves, TLS_ECDHE_CURVES,
+			    sizeof(newthg->tls_ecdhe_curves));
 		} '{' optnl thingopts2 '}' {
 			if (newthg->ipaddr != NULL && newthg->conn_port == -1) {
 				yyerror("ipaddr connect port empty");
@@ -364,8 +419,91 @@ thing		: THING STRING	 {
 				yyerror("could not set default port");
 				YYERROR;
 			}
+			if (newthg->tls)
+				if (load_tls(newthg) == -2)
+					YYABORT;
 			TAILQ_INSERT_TAIL(&pthgsd->thgs, newthg, entry);
 		}
+		;
+tlsopts		: CERTIFICATE STRING {
+			free(newthg->tls_cert_file);
+			if ((newthg->tls_cert_file = strdup($2)) == NULL)
+				fatal("out of memory");
+			free($2);
+		}
+		| KEY STRING {
+			free(newthg->tls_key_file);
+			if ((newthg->tls_key_file = strdup($2)) == NULL)
+				fatal("out of memory");
+			free($2);
+		}
+		| OCSP STRING {
+			free(newthg->tls_ocsp_staple_file);
+			if ((newthg->tls_ocsp_staple_file = strdup($2)) == NULL)
+				fatal("out of memory");
+			free($2);
+		}
+		| CIPHERS STRING {
+			if (strlcpy(newthg->tls_ciphers, $2,
+			    sizeof(newthg->tls_ciphers)) >=
+			    sizeof(newthg->tls_ciphers)) {
+				yyerror("ciphers too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
+		| CLIENT CA STRING tlscltopt {
+			newthg->tls_flags |= TLSFLAG_CA;
+			free(newthg->tls_ca_file);
+			if ((newthg->tls_ca_file = strdup($3)) == NULL)
+				fatal("out of memory");
+			free($3);
+		}
+		| DHE STRING {
+			if (strlcpy(newthg->tls_dhe_params, $2,
+			    sizeof(newthg->tls_dhe_params)) >=
+			    sizeof(newthg->tls_dhe_params)) {
+				yyerror("dhe too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
+		| ECDHE STRING {
+			if (strlcpy(newthg->tls_ecdhe_curves, $2,
+			    sizeof(newthg->tls_ecdhe_curves)) >=
+			    sizeof(newthg->tls_ecdhe_curves)) {
+				yyerror("ecdhe too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
+		| PROTOCOLS STRING {
+			if (tls_config_parse_protocols(
+			    &newthg->tls_protocols, $2) != 0) {
+				yyerror("invalid tls protocols");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
+		;
+tlscltopt	: /* empty */
+		| tlscltopt CRL STRING {
+			newthg->tls_flags = TLSFLAG_CRL;
+			free(newthg->tls_crl_file);
+			if ((newthg->tls_crl_file = strdup($3)) == NULL)
+				fatal("out of memory");
+			free($3);
+		}
+		| tlscltopt OPTIONAL {
+			newthg->tls_flags |= TLSFLAG_OPTIONAL;
+		}
+		;
+optcomma	: ',' optcomma
+		| /* emtpy */
 		;
 optnl		: '\n' optnl
 		| /* empty */
@@ -403,35 +541,47 @@ kw_cmp(const void *k, const void *e)
 int lookup(char *s) {
 	/* this has to be sorted always */
 	static const struct keywords keywords[] = {
-		{"baud",		BAUD},
-		{"bind",		BIND},
-		{"clients",		CLIENTS},
-		{"connect",		CONNECT},
-		{"connection",		CONNECTION},
-		{"data",		DATA},
-		{"default",		DEFAULT},
-		{"hardware",		HARDWARE},
-		{"interface",		INTERFACE},
-		{"ipaddr",		IPADDR},
-		{"listen",		LISTEN},
-		{"location",		LOCATION},
-		{"log",			LOG},
-		{"max",			MAX},
-		{"name",		NAME},
-		{"parity",		PARITY},
-		{"password",		PASSWORD},
-		{"persistent",		PERSISTENT},
-		{"port",		PORT},
-		{"receive",		RECEIVE},
-		{"retry",		RETRY},
-		{"software",		SOFTWARE},
-		{"stop",		STOP},
-		{"subscribe",		SUBSCRIBE},
-		{"subscriptions",	SUBSCRIPTIONS},
-		{"thing",		THING},
-		{"things",		THINGS},
-		{"udp",			UDP},
-		{"verbose",		VERBOSE}
+		{ "baud",		BAUD },
+		{ "bind",		BIND },
+		{ "ca",			CA },
+		{ "certificate",	CERTIFICATE },
+		{ "ciphers",		CIPHERS },
+		{ "clients",		CLIENTS },
+		{ "connect",		CONNECT },
+		{ "connection",		CONNECTION },
+		{ "crl",		CRL },
+		{ "data",		DATA },
+		{ "default",		DEFAULT },
+		{ "dhe",		DHE },
+		{ "ecdhe",		ECDHE },
+		{ "hardware",		HARDWARE },
+		{ "interface",		INTERFACE },
+		{ "ipaddr",		IPADDR },
+		{ "key",		KEY },
+		{ "listen",		LISTEN },
+		{ "location",		LOCATION },
+		{ "log",		LOG },
+		{ "max",		MAX },
+		{ "name",		NAME },
+		{ "ocsp",		OCSP },
+		{ "on",			ON },
+		{ "optional",		OPTIONAL },
+		{ "parity",		PARITY },
+		{ "password",		PASSWORD },
+		{ "persistent",		PERSISTENT },
+		{ "protocols",		PROTOCOLS },
+		{ "port",		PORT },
+		{ "receive",		RECEIVE },
+		{ "retry",		RETRY },
+		{ "software",		SOFTWARE },
+		{ "stop",		STOP },
+		{ "subscribe",		SUBSCRIBE },
+		{ "subscriptions",	SUBSCRIPTIONS },
+		{ "thing",		THING },
+		{ "things",		THINGS },
+		{ "tls",		TLS },
+		{ "udp",		UDP },
+		{ "verbose",		VERBOSE}
 	};
 	const struct keywords	*p;
 	p = bsearch(s, keywords, sizeof(keywords)/sizeof(keywords[0]),
@@ -790,3 +940,28 @@ new_thg(char *name)
 		fatalx("no thg name");
 	return (thg);
 };
+
+int
+load_tls(struct thg *pthg)
+{
+	if (tls_load_keypair(pthg) == -1) {
+		log_warnx("%s:%d: thing \"%s\": failed to load public/private"
+		    " keys", file->name, yylval.lineno, pthg->name);
+		return -1;
+	}
+	if (tls_load_ca(pthg) == -1) {
+		yyerror("failed to load ca cert(s) for thing %s", pthg->name);
+		return -2;
+	}
+	if (tls_load_crl(pthg) == -1) {
+		yyerror("failed to load crl(s) for thing %s", pthg->name);
+		free(pthg);
+		return -2;
+	}
+	if (tls_load_ocsp(pthg) == -1) {
+		yyerror("failed to load ocsp staple for thing %s", pthg->name);
+		free(pthg);
+		return -2;
+	}
+	return 0;
+}

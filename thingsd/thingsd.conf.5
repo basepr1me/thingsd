@@ -18,7 +18,7 @@
 .Os
 .Sh NAME
 .Nm thingsd.conf
-.Nd thingsd proxy daemon configuration file
+.Nd thingsd OpenBSD proxy daemon configuration file
 .Sh DESCRIPTION
 .Nm
 is the configuration file for the things proxy daemon,
@@ -47,14 +47,15 @@ the comment is effective until the end of the entire block.
 .Pp
 Argument names not beginning with a letter, digit, or underscore
 must be quoted.
-.Ed
 .Sh GLOBAL CONFIGURATION
 Here are the settings that can be set globally:
 .Bl -tag -width Ds
 .It Ic default port Ar number
-Set the default port for things to communicate on. This is a required setting.
+Set the default port for things to communicate on.
+This is a required setting.
 .It Ic bind interface Ar string
-Specify a single interface to create sockets on. If this is not set,
+Specify a single interface to create sockets on.
+If this is not set,
 .Xr thingsd 8
 will attempt to open the default port on all network interfaces.
 .It Ic max clients Ar number
@@ -63,13 +64,14 @@ Set the default maximum number of clients allowed to connect to each
 .It Ic max subscriptions Ar number
 Set the maximum number of things a client can subscribe to at a time.
 .It Ic connection retry Ar number
-Set the lost connection thing watchdog interval. Default is 30
-seconds. Range is 30-600 seconds.
+Set the lost connection thing watchdog interval.
+Default is 30 seconds.
+Range is 30-600 seconds.
 .It Ic log verbose Ar number
-Turn on verbose logging. (This option is currently disabled.)
+Turn on verbose logging.
 .El
 .Sh THINGS
-things represent a serial thing or a TCP/IP host for
+things represent a serial, TCP/IP, or UDP listener thing for
 .Xr thingsd 8
 to communicate with.
 .Xr thingsd 8
@@ -91,7 +93,8 @@ Set the data bits for a serial thing
 .It Ic connect on port Ar number
 Set the TCP/IP port to connect to for an
 .Ar ipaddr
-thing. This setting is required for
+thing.
+This setting is required for
 .Ar ipaddr
 things.
 .It Ic thing Ar string Brq ...
@@ -107,18 +110,21 @@ Set to 1 to turn on hardware control for a serial thing
 Create a
 .Ar thing
 connection to a hostname or IP address.
-.It Ic listen on port Ar number
+.It Ic listen on Oo Ic tls Oc port Ar number
 Set a local socket port for a
 .Ar location ,
 .Ar udp ,
 or
 .Ar ipaddr
 thing, other than the global default port.
+If TLS is used, the chosen port must be unique from the default port and all
+other things.
 .It Ic location Ar string Brq ...
 Create a
 .Ar thing
-connection to serial interface. These are any valid /dev things, for example
-/dev/ttyU0. Set the owner of a thing to _thingsd to allow for autoreconnect in
+connection to serial interface.
+These are any valid /dev things, for example /dev/ttyU0.
+Set the owner of a thing to _thingsd to allow for autoreconnect in
 a privdrop environment, in the event of a serial thing disconnect.
 .It Ic max clients Ar number
 Set the maximum clients allowed to connect to a thing
@@ -139,18 +145,20 @@ Set whether
 .Xr thingsd 8
 binds to an
 .Ar ipaddr
-thing. If
+thing.
+If
 .Ar persistent
 is set to 0,
 .Xr thingsd 8
-will create a socket, send a client packet, and close that socket. Clients
-cannot receive on a non-persistent
+will create a socket, send a client packet, and close that socket.
+Clients cannot receive on a non-persistent
 .Ar ipaddr
 thing.
 .It Ic receive on port Ar number
 Set the
 .Ar udp
-port to listen on for a UDP packet. This setting is required for
+port to listen on for a UDP packet.
+This setting is required for
 .Ar udp
 things.
 .It Ic software Ar number
@@ -159,6 +167,92 @@ Set to 1 to turn on software control for a serial thing
 .It Ic stop Ar number
 Set the stop bit for a serial thing
 .Ar location .
+.It Ic tls Ar option
+Set the TLS configuration for a thing.
+These options are only used if TLS has been enabled via the listen directive.
+Valid options are:
+.Bl -tag -width Ds
+.It Ic certificate Ar file
+Specify the certificate to use for this thing.
+The
+.Ar file
+should contain a PEM encoded certificate.
+The default is
+.Pa /etc/ssl/thing.crt .
+.It Ic ciphers Ar string
+Specify the TLS cipher string.
+If not specified, the default value
+.Qq HIGH:!aNULL
+will be used (strong crypto cipher suites without anonymous DH).
+See the CIPHERS section of
+.Xr openssl 1
+for information about SSL/TLS cipher suites and preference lists.
+.It Ic client ca Ar cafile Oo Ic crl Ar crlfile Oc Op Ic optional
+Require
+.Po
+or, if
+.Ic optional
+is specified, request but do not require
+.Pc
+TLS client certificates whose authenticity can be verified
+against the CA certificate(s) in
+.Ar cafile
+in order to proceed beyond the TLS handshake.
+With
+.Ic crl
+specified, additionally require that no certificate in the client chain be
+listed as revoked in the CRL(s) in
+.Ar crlfile .
+CA certificates and CRLs should be PEM encoded.
+.It Ic dhe Ar params
+Specify the DHE parameters to use for DHE cipher suites.
+Valid parameter values are none, legacy and auto.
+For legacy a fixed key length of 1024 bits is used, whereas for auto the key
+length is determined automatically.
+The default is none, which disables DHE cipher suites.
+.It Ic ecdhe Ar curves
+Specify a comma separated list of elliptic curves to use for ECDHE cipher suites,
+in order of preference.
+The special value of "default" will use the default curves; see
+.Xr tls_config_set_ecdhecurves 3
+for further details.
+.It Ic key Ar file
+Specify the private key to use for this thing.
+The
+.Ar file
+should contain a PEM encoded private key and reside outside of the
+.Xr chroot 2
+root directory of
+.Nm httpd .
+The default is
+.Pa /etc/ssl/private/thing.key .
+.It Ic ocsp Ar file
+Specify an OCSP response to be stapled during TLS handshakes
+with this thing.
+The
+.Ar file
+should contain a DER-format OCSP response retrieved from an
+OCSP server for the
+.Ar certificate
+in use,
+and can be created using
+.Xr ocspcheck 8 .
+The path to
+.Ar file
+is not relative to the chroot.
+If the OCSP response in
+.Ar file
+is empty, OCSP stapling will not be used.
+The default is to not use OCSP stapling.
+.It Ic protocols Ar string
+Specify the TLS protocols to enable for this thing.
+If not specified, the value
+.Qq default
+will be used (secure protocols; TLSv1.2-only).
+Refer to the
+.Xr tls_config_parse_protocols 3
+function for other valid protocol string values.
+.El
 .It Ic udp Ar string Brq ...
 Create a
 .Ar thing
@@ -182,11 +276,14 @@ max suscriptions 5
 
 thing "serial_thing" {
 	location "/dev/ttyU0" {
+		listen on tls port 50060
 		baud 9600
 		max clients 1
 		data 8
 		parity "none"
 		stop 1
+		tls certificate "/etc/ssl/my_thing.crt"
+		tls key "/etc/ssl/private/my_thing.key"
 		#no password required for our one allowed client
 	}
 }
@@ -194,7 +291,6 @@ thing "serial_thing" {
 thing "ipaddr_thing" {
 	ipaddr "10.0.0.1" {
 		connect on port 8080
-		listen on port 50010
 		password "password"
 	}
 }
@@ -207,12 +303,11 @@ thing "udp_thing" {
 	}
 }
 .Ed
-.Pp
-.El
 .Sh FILES
 .Bl -tag -width Ds -compact
 .It Pa /etc/thingsd.conf
 .Xr thingsd 8 configuration file.
+.El
 .Sh SEE ALSO
 .Xr thingsctl 8 ,
 .Xr thingsd 8

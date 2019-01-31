@@ -53,6 +53,10 @@ create_socks(struct thgsd *pthgsd, bool reconn)
 				continue;
 		}
 		sock = new_sock(thg->port);
+		if (thg->tls)
+			sock_tls_init(sock, thg);
+		else
+			sock->tls = false;
 		sock->max_clts += thg->max_clt;
 		sock->name = thg->name;
 		if (thg->iface != NULL)

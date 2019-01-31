@@ -1,7 +1,7 @@
 PROG=		thingsd
 
 SRCS=		parse.y
-SRCS+=		log.c serial.c sockets.c client.c events.c
+SRCS+=		log.c serial.c sockets.c client.c events.c tls.c
 
 SRCS+=		thingsd.c
 
