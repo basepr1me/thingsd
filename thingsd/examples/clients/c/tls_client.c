@@ -169,7 +169,6 @@ int main(int argc, char *argv[])
 		 */
 		buffer[rc] = '\0';
 		printf("Thing sent:  %s\n",buffer);
-		sleep(1);
 	}
 	do {
 		i = tls_close(tls_ctx);
