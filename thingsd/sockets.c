@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019 Tracey Emery <tracey@traceyemery.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,7 +30,7 @@
 
 #include "thingsd.h"
 
-extern struct dthgs		*pdthgs;
+extern struct dthgs	*pdthgs;
 
 void
 create_socks(struct thgsd *pthgsd, bool reconn)
@@ -64,7 +64,7 @@ create_socks(struct thgsd *pthgsd, bool reconn)
 		if (thg->type == DEV) {
 			if((csock = sock->fd = create_sock(thg->port, iface,
 			    TCP)) == -1)
-				log_info("fd create socket failed");
+				log_warnx("fd create socket failed");
 			else if (thg->fd != -1)
 				thg->exists = true;
 			else {
@@ -77,13 +77,13 @@ create_socks(struct thgsd *pthgsd, bool reconn)
 			conn_sock = new_sock(thg->conn_port);
 			if ((csock = sock->fd = create_sock(thg->port, iface,
 			    TCP)) == -1)
-				log_info("udp create socket failed");
+				log_warnx("udp create socket failed");
 			else
 				thg->exists = true;
 			if ((conn_csock = conn_sock->fd =
 			    create_sock(thg->conn_port, iface,
 		 	    thg->type)) == -1)
-				log_info("udp create socket failed");
+				log_warnx("udp create socket failed");
 			else
 				thg->exists = true;
 			thg->fd = conn_sock->fd;
@@ -94,7 +94,7 @@ create_socks(struct thgsd *pthgsd, bool reconn)
 			if (thg->persist == 1) {
 				if ((thg->fd = open_clt_sock(thg->ipaddr,
 				    thg->conn_port)) == -1) {
-					log_info("ipaddr connection failed");
+					log_warnx("ipaddr connection failed");
 					if (reconn)
 						continue;
 					thg->exists = false;
@@ -117,7 +117,7 @@ create_socks(struct thgsd *pthgsd, bool reconn)
 			if (reconn == false) {
 				if ((csock = sock->fd = create_sock(thg->port,
 				    iface, TCP)) == -1) {
-					log_info("tcp create socket failed");
+					log_warnx("tcp create socket failed");
 					thg->exists = false;
 					add_reconn(thg);
 				} else {
@@ -188,22 +188,17 @@ create_sock(int iport, char *iface, int type)
 		addr_hints.ai_flags |= AI_PASSIVE;
 		break;
 	}
-	if ((gai = getaddrinfo(iface, port, &addr_hints, &addr_res)) != 0) {
+	if ((gai = getaddrinfo(iface, port, &addr_hints, &addr_res)) != 0)
 		fatalx("getaddrinfo failed: %s", gai_strerror(gai));
-		return -1;
-	}
 	for (loop_res = addr_res; loop_res != NULL;
 	    loop_res = loop_res->ai_next) {
 		if ((sock_fd = socket(loop_res->ai_family,
-		    loop_res->ai_socktype, loop_res->ai_protocol)) == -1) {
+		    loop_res->ai_socktype, loop_res->ai_protocol)) == -1)
 			fatalx("unable to create socket");
-			return -1;
-		}
 		if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &o_val,
 		    sizeof(int)) == -1) {
-			fatalx("setsockopt error");
 			freeaddrinfo(addr_res);
-			return -1;
+			fatalx("setsockopt error");
 		}
 		/* non-blocking */
 		flags = fcntl(sock_fd, F_GETFL);
@@ -219,9 +214,8 @@ create_sock(int iport, char *iface, int type)
 		break;
 	}
 	if (loop_res == NULL) {
-		fatalx("can't bind to port");
 		freeaddrinfo(addr_res);
-		return -1;
+		fatalx("can't bind to port");
 	}
 	freeaddrinfo(addr_res);
 	if (type == TCP) {
@@ -236,9 +230,9 @@ create_sock(int iport, char *iface, int type)
 int
 open_clt_sock(char *ip_addr, int cport)
 {
-	struct addrinfo			 hints, *res, *res0;
-	int				 client_fd, error;
-	char				 port[6];
+	struct addrinfo		 hints, *res, *res0;
+	int			 client_fd, error;
+	char			 port[6];
 
 	memset(&hints, 0, sizeof(hints));
 	snprintf(port, sizeof(port), "%d", cport);
@@ -246,7 +240,7 @@ open_clt_sock(char *ip_addr, int cport)
 	hints.ai_socktype = SOCK_STREAM;
 	error = getaddrinfo(ip_addr, port, &hints, &res0);
 	if (error)
-		fatalx("getaddrinfo: %s", gai_strerror(error));
+		fatalx("getaddrinfo failed: %s", gai_strerror(error));
 	client_fd = -1;
 	for (res = res0; res; res = res->ai_next) {
 		client_fd = socket(res->ai_family, res->ai_socktype,
@@ -269,9 +263,9 @@ open_clt_sock(char *ip_addr, int cport)
 char *
 get_ifaddrs(char *name)
 {
-	struct ifaddrs			*ifap;
-	struct sockaddr			*sa;
-	char				*addr = NULL;
+	struct ifaddrs		*ifap;
+	struct sockaddr		*sa;
+	char			*addr = NULL;
 
 	if (getifaddrs(&ifap) == -1)
 		fatalx("getifaddrs error");
@@ -386,7 +380,7 @@ sock_err(struct bufferevent *bev, short error, void *arg)
 				thg->fd = -1;
 				thg->exists = false;
 				add_reconn(thg);
-				log_info("thing error: %s disconnected",
+				log_warnx("thing error: %s disconnected",
 				    thg->name);
 			}
 		}

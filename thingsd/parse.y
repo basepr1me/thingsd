@@ -30,6 +30,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <syslog.h>
 #include <unistd.h>
 
 #include "thingsd.h"
@@ -158,7 +159,7 @@ subthgs		: THING '{' STRING ',' STRING '}' optcomma {
 				if (strcmp(clt->name, my_name) == 0) {
 					if (my_fd != clt->fd) {
 						fail = true;
-						log_info("client exists");
+						log_warn("client exists");
 					}
 					for (n = 0; n < clt->le; n++)
 						if (strcmp(clt->sub_names[n],
@@ -182,7 +183,7 @@ subthgs		: THING '{' STRING ',' STRING '}' optcomma {
 					if (strcmp(thg->password, $5) == 0) {
 						if (clt->subs++ >=
 						    pthgsd->max_sub) {
-						    	log_info("max "
+						    	log_warn("max "
 							    "subscriptions "
 							    "reached");
 							continue;
@@ -302,7 +303,7 @@ locopts1	: LISTEN ON opttls PORT NUMBER {
 		}
 		| PASSWORD STRING {
 			if ((newthg->password = strdup($2)) == NULL)
-				fatal("out of memory");
+				fatalx("out of memory");
 			free($2);
 		}
 		| bindopts2
@@ -331,12 +332,12 @@ socopts1	: LISTEN ON opttls PORT NUMBER {
 		| CONNECT ON PORT NUMBER {
 			newthg->conn_port = $4;
 		}
-		| RECEIVE STRING PORT NUMBER {
+		| RECEIVE ON PORT NUMBER {
 			newthg->conn_port = $4;
 		}
 		| PASSWORD STRING {
 			if ((newthg->password = strdup($2)) == NULL)
-				fatal("out of memory");
+				fatalx("out of memory");
 			free($2);
 		}
 		| PERSISTENT NUMBER {
@@ -388,9 +389,9 @@ thing		: THING STRING	 {
 			newthg->tls_protocols = TLS_PROTOCOLS_DEFAULT;
 			newthg->tls_flags = 0;
 			if ((newthg->tls_cert_file = strdup(TLS_CERT)) == NULL)
-				fatal("out of memory");
+				fatalx("out of memory");
 			if ((newthg->tls_key_file = strdup(TLS_KEY)) == NULL)
-				fatal("out of memory");
+				fatalx("out of memory");
 			strlcpy(newthg->tls_ciphers, TLS_CIPHERS,
 			    sizeof(newthg->tls_ciphers));
 			strlcpy(newthg->tls_dhe_params, TLS_DHE_PARAMS,
@@ -428,19 +429,19 @@ thing		: THING STRING	 {
 tlsopts		: CERTIFICATE STRING {
 			free(newthg->tls_cert_file);
 			if ((newthg->tls_cert_file = strdup($2)) == NULL)
-				fatal("out of memory");
+				fatalx("out of memory");
 			free($2);
 		}
 		| KEY STRING {
 			free(newthg->tls_key_file);
 			if ((newthg->tls_key_file = strdup($2)) == NULL)
-				fatal("out of memory");
+				fatalx("out of memory");
 			free($2);
 		}
 		| OCSP STRING {
 			free(newthg->tls_ocsp_staple_file);
 			if ((newthg->tls_ocsp_staple_file = strdup($2)) == NULL)
-				fatal("out of memory");
+				fatalx("out of memory");
 			free($2);
 		}
 		| CIPHERS STRING {
@@ -457,7 +458,7 @@ tlsopts		: CERTIFICATE STRING {
 			newthg->tls_flags |= TLSFLAG_CA;
 			free(newthg->tls_ca_file);
 			if ((newthg->tls_ca_file = strdup($3)) == NULL)
-				fatal("out of memory");
+				fatalx("out of memory");
 			free($3);
 		}
 		| DHE STRING {
@@ -495,7 +496,7 @@ tlscltopt	: /* empty */
 			newthg->tls_flags = TLSFLAG_CRL;
 			free(newthg->tls_crl_file);
 			if ((newthg->tls_crl_file = strdup($3)) == NULL)
-				fatal("out of memory");
+				fatalx("out of memory");
 			free($3);
 		}
 		| tlscltopt OPTIONAL {
@@ -527,7 +528,7 @@ yyerror(const char *fmt, ...)
 	if (vasprintf(&msg, fmt, ap) == -1)
 		fatalx("yyerror vasprintf");
 	va_end(ap);
-	log_warnx("%s:%d: %s", file->name, yylval.lineno, msg);
+	logit(LOG_CRIT, "%s:%d: %s", file->name, yylval.lineno, msg);
 	free(msg);
 	return (0);
 }
@@ -743,7 +744,7 @@ yylex(void)
 		}
 		yylval.v.string = strdup(buf);
 		if (yylval.v.string == NULL)
-			fatal("yylex: strdup");
+			fatalx("yylex: strdup");
 		return (STRING);
 	}
 #define allowed_to_end_number(x) \
@@ -797,7 +798,7 @@ nodigits:
 		*p = '\0';
 		if ((token = lookup(buf)) == STRING)
 			if ((yylval.v.string = strdup(buf)) == NULL)
-				fatal("yylex: strdup");
+				fatalx("yylex: strdup");
 		return (token);
 	}
 	if (c == '\n') {

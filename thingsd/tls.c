@@ -101,7 +101,7 @@ sock_tls_init(struct sock *psock, struct thg *pthg)
 		return (-1);
 	}
 	if ((psock->tls_config = tls_config_new()) == NULL) {
-		log_warnx("%s: failed to get tls pthgig", __func__);
+		log_warnx("%s: failed to get tls config", __func__);
 		return (-1);
 	}
 	if ((psock->tls_ctx = tls_server()) == NULL) {
@@ -207,13 +207,13 @@ sock_tls_handshake(int fd, short event, void *arg)
 		event_set(clt->ev, clt->fd, EV_READ|EV_PERSIST,
 			    sock_tls_handshake, pthgsd);
 		if (event_add(clt->ev, NULL))
-			log_info("event add clt");
+			log_debug("%s: event add clt", __func__);
 	} else if (ret == TLS_WANT_POLLOUT) {
 		event_del(clt->ev);
 		event_set(clt->ev, clt->fd, EV_WRITE|EV_PERSIST,
 			    sock_tls_handshake, pthgsd);
 		if (event_add(clt->ev, NULL))
-			log_info("event add clt");
+			log_debug("%s: event add clt", __func__);
 	} else {
 		event_del(clt->ev);
 		log_debug("%s: tls handshake failed - %s", __func__,

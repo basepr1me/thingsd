@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019 Tracey Emery <tracey@traceyemery.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,6 +18,7 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 
+#include <errno.h>
 #include <event.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -28,10 +29,10 @@
 
 #include "thingsd.h"
 
-extern void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t,
-		    size_t, void *);
+extern void		 bufferevent_read_pressure_cb(struct evbuffer *, size_t,
+			    size_t, void *);
 
-	void
+void
 clt_conn(int fd, short event, void *arg)
 {
 	struct sockaddr_storage	 ss;
@@ -43,7 +44,7 @@ clt_conn(int fd, short event, void *arg)
 
 	if ((clt_fd = accept4(fd, (struct sockaddr *)&ss, &len,
 	    SOCK_NONBLOCK)) == -1) {
-		log_info("clt accept failed");
+		log_warnx("clt accept failed");
 		return;
 	}
 	if ((clt = calloc(1, sizeof(*clt))) == NULL)
@@ -55,7 +56,7 @@ clt_conn(int fd, short event, void *arg)
 	if (sock->tls) {
 		if (tls_accept_socket(sock->tls_ctx, &clt->tls_ctx, clt_fd)
 		    == -1) {
-			log_info("tls accept failed: %s",
+			log_warnx("tls accept failed: %s",
 			    tls_error(sock->tls_ctx));
 			goto err;
 		}
@@ -67,9 +68,10 @@ clt_conn(int fd, short event, void *arg)
 	sock->clt_cnt++;
 	pthgsd->clt_cnt++;
 	if (sock->max_clts > 0 && sock->clt_cnt > sock->max_clts) {
-		log_info("%s max clients reached", sock->name);
+		log_debug("%s: %s max clients reached", __func__, sock->name);
 		sock->clt_cnt--;
 		pthgsd->clt_cnt--;
+		free(clt->sub_names);
 		goto err;
 	}
 	clt->port = sock->port;
@@ -79,6 +81,7 @@ clt_conn(int fd, short event, void *arg)
 	if (clt->evb == NULL) {
 		sock->clt_cnt--;
 		pthgsd->clt_cnt--;
+		free(clt->sub_names);
 		goto err;
 	}
 	clt->fd = clt_fd;
@@ -88,23 +91,25 @@ clt_conn(int fd, short event, void *arg)
 		clt->tls = true;
 		event_del(clt->ev);
 		event_set(clt->ev, clt->fd, EV_READ|EV_PERSIST,
-			    sock_tls_handshake, pthgsd);
-		if (event_add(clt->ev, NULL))
+		    sock_tls_handshake, pthgsd);
+		if (event_add(clt->ev, NULL)) {
+			free(clt->sub_names);
 			goto err;
+		}
 		return;
 	}
 	clt_add(pthgsd, clt);
 	return;
  err:
-	log_info("client error");
+	log_debug("%s: client error", __func__);
 	if (clt_fd != -1) {
 		close(clt_fd);
 		if (sock->tls) {
 			tls_free(clt->tls_ctx);
 			free(clt->ev);
 		}
-		free(clt);
 	}
+	free(clt);
 }
 
 void
@@ -115,7 +120,7 @@ clt_add(struct thgsd *pthgsd, struct clt *pclt)
 	evbuffercb		 cltrd = clt_rd;
 	evbuffercb		 cltwr = clt_wr;
 
-	log_info("client connected");
+	log_debug("%s: client connected, %d", __func__, clt->fd);
 	clt->bev = bufferevent_new(clt->fd, cltrd, cltwr, clt_err, pthgsd);
 	if (clt->bev == NULL) {
 		sock->clt_cnt--;
@@ -134,15 +139,15 @@ clt_add(struct thgsd *pthgsd, struct clt *pclt)
 	start_clt_chk(pthgsd);
 	return;
  err:
-	log_info("client error");
+	log_debug("%s: client error", __func__);
 	if (clt->fd != -1) {
 		close(clt->fd);
 		if (sock->tls) {
 			tls_free(clt->tls_ctx);
 			free(clt->ev);
 		}
-		free(clt);
 	}
+	free(clt);
 }
 
 void
@@ -167,7 +172,7 @@ clt_del(struct thgsd *pthgsd, struct clt *pclt)
 			pthgsd->clt_cnt--;
 			clt->sock->clt_cnt--;
 			if (clt->subscribed == false)
-				log_info("client disconnected");
+				log_debug("%s: client disconnected", __func__);
 			else
 				log_info("client disconnected: %s", clt->name);
 			TAILQ_REMOVE(&pthgsd->clts, clt, entry);
@@ -298,7 +303,8 @@ clt_wr_thgs(struct clt *clt, struct thg *thg, size_t len)
 		if (thg->persist == false) {
 			if ((thg->fd = open_clt_sock(thg->ipaddr,
 			    thg->conn_port)) == -1) {
-				log_info("temporary ipaddr connection failed");
+				log_warnx("%s: temporary ipaddr connection"
+				    " failed", __func__);
 				return;
 			}
 			evbuffer_remove(clt->evb, pkt, len);
@@ -324,6 +330,7 @@ clt_wr_thgs(struct clt *clt, struct thg *thg, size_t len)
 void
 clt_wr(struct bufferevent *bev, void *arg)
 {
+	/* nothing here */
 }
 
 void
@@ -377,7 +384,7 @@ clt_err(struct bufferevent *bev, short error, void *arg)
 	int			 fd = bev->ev_read.ev_fd;
 
 	if ((error & EVBUFFER_EOF) == 0)
-		log_info("client socket error, disconnecting");
+		log_warnx("%s: client socket error, disconnecting", __func__);
 	/* client disconnect */
 	TAILQ_FOREACH(clt, &pthgsd->clts, entry) {
 		if (clt->fd == fd) {
@@ -422,7 +429,7 @@ start_clt_chk(struct thgsd *pthgsd)
 
 	rclt_chk = pthread_create(&tclt_chk, NULL, clt_chk, (void *)pthgsd);
 	if (rclt_chk) {
-		log_info("thread creation failed");
+		log_warnx("%s: thread creation failed", __func__);
 		clt_chk((void *) pthgsd);
 	}
 }

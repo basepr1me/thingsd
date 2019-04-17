@@ -1,4 +1,3 @@
-#SUBDIR = thingsd thingsctl
-SUBDIR = thingsd
+SUBDIR = thingsd thingsctl
 
 .include <bsd.subdir.mk>

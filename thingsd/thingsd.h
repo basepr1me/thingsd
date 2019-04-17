@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019 Tracey Emery <tracey@traceyemery.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -21,14 +21,17 @@
 #include <sys/time.h>
 
 #include <event.h>
+#include <imsg.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <tls.h>
 
+#include "log.h"
+
 #define PATH_CONF		 "/etc/thingsd.conf"
 #define TH_USER			 "_thingsd"
-#define THINGSD_SOCK		 "/var/run/httpd.sock"
+#define THINGSD_SOCK		 "/var/run/thingsd.sock"
 #define CONN_RTRY		 30
 #define MIN_RTRY		 10
 #define MAX_RTRY		 600
@@ -65,6 +68,36 @@ struct dthg {
 	char			*name;
 	int			 type;
 	time_t			 dtime;
+};
+
+struct thg_imsg {
+	bool			 exists;
+	bool			 hw_ctl;
+	bool			 persist;
+	bool			 sw_ctl;
+	char			 iface[BUFF];
+	char			 ipaddr[BUFF];
+	char			 name[BUFF];
+	char			 parity[BUFF];
+	char			 password[BUFF];
+	char			 location[BUFF];
+	char			 udp[BUFF];
+	int			 fd;
+	int			 baud;
+	int			 conn_port;
+	int			 data_bits;
+	int			 max_clt;
+	int			 port;
+	int			 stop_bits;
+	int			 type;
+	size_t			 clt_cnt;
+
+	bool			 tls;
+	char			 tls_cert_file[BUFF];
+	char			 tls_key_file[BUFF];
+	char			 tls_ca_file[BUFF];
+	char			 tls_crl_file[BUFF];
+	char			 tls_ocsp_staple_file[BUFF];
 };
 
 struct thg {
@@ -115,6 +148,16 @@ struct thg {
 	uint32_t		 tls_protocols;
 };
 
+struct sock_imsg {
+	char			 name[BUFF];
+	int			 fd;
+	int			 port;
+	size_t			 clt_cnt;
+	size_t			 max_clts;
+
+	bool			 tls;
+};
+
 struct sock {
 	TAILQ_ENTRY(sock)	 entry;
 	struct event		*ev;
@@ -129,6 +172,16 @@ struct sock {
 	bool			 tls;
 	struct tls_config	*tls_config;
 	struct tls		*tls_ctx;
+};
+
+struct clt_imsg {
+	bool			 subscribed;
+	char			 name[BUFF];
+	int			 fd;
+	int			 port;
+	size_t			 subs;
+
+	bool			 tls;
 };
 
 struct clt {
@@ -176,7 +229,68 @@ struct thgsd {
 	struct event		 evsigterm;
 	struct event		 evsigint;
 	struct event		 evsighup;
+
+	/* ctl */
+	struct event_base	*ctl_eb;
+	struct event		 ctl_evsigquit;
+	struct event		 ctl_evsigterm;
+	struct event		 ctl_evsigint;
 };
+
+/* control.c */
+#define IMSG_DATA_SIZE(imsg)    ((imsg).hdr.len - IMSG_HEADER_SIZE)
+
+enum {
+	PROC_MAIN,
+	PROC_CTL,
+} thgsd_process;
+
+static const char * const log_procnames[] = {
+	"thingsd main",
+	"thingsd control",
+};
+
+enum ctl_list_type {
+	CTL_LIST_CLTS,
+	CTL_LIST_THGS,
+	CTL_LIST_SOCKS,
+};
+
+struct imsgev {
+	struct imsgbuf		 ibuf;
+	void			(*handler)(int, short, void *);
+	struct event		 ev;
+	short			 events;
+};
+
+int				 control_init(char *);
+int				 control_listen(void);
+void				 control_accept(int, short, void *);
+void				 control_dispatch_imsg(int, short, void *);
+int				 control_imsg_relay(struct imsg *);
+
+TAILQ_HEAD(ctl_conns, ctl_conn)	ctl_conns;
+
+enum imsg_type {
+	IMSG_NONE,
+	IMSG_CTL_LOG_VERBOSE,
+	IMSG_CTL_LIST,
+	IMSG_CTL_END,
+	IMSG_LIST_CLTS,
+	IMSG_LIST_THGS,
+	IMSG_LIST_SOCKS,
+	IMSG_KILL_CLT,
+	IMSG_ADD_THG,
+	IMSG_DEL_THG,
+	IMSG_SHOW_PKTS
+};
+
+void				 imsg_event_add(struct imsgev *);
+int				 imsg_compose_event(struct imsgev *, uint16_t,
+				    uint32_t, pid_t, int, void *, uint16_t);
+
+/* ctl.c */
+void             		 thgs_ctl(int, int, char*);
 
 /* thingsd.c */
 struct dthg			*new_dthg(struct thg *);
@@ -229,26 +343,4 @@ int				 tls_load_crl(struct thg *);
 int				 tls_load_ocsp(struct thg *);
 int				 sock_tls_init(struct sock *, struct thg *);
 void				 sock_tls_handshake(int, short, void *);
-
-/* log.c */
-void	log_init(int, int);
-void	log_procinit(const char *);
-void	log_setverbose(int);
-int	log_getverbose(void);
-void	log_warn(const char *, ...)
-	    __attribute__((__format__ (printf, 1, 2)));
-void	log_warnx(const char *, ...)
-	    __attribute__((__format__ (printf, 1, 2)));
-void	log_info(const char *, ...)
-	    __attribute__((__format__ (printf, 1, 2)));
-void	log_debug(const char *, ...)
-	    __attribute__((__format__ (printf, 1, 2)));
-void	logit(int, const char *, ...)
-	    __attribute__((__format__ (printf, 2, 3)));
-void	vlog(int, const char *, va_list)
-	    __attribute__((__format__ (printf, 2, 0)));
-__dead void fatal(const char *, ...)
-	    __attribute__((__format__ (printf, 1, 2)));
-__dead void fatalx(const char *, ...)
-	    __attribute__((__format__ (printf, 1, 2)));
 #endif /* _THINGSD_H */

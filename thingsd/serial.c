@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019 Tracey Emery <tracey@traceyemery.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -27,7 +27,7 @@
 
 #include "thingsd.h"
 
-extern struct dthgs		*pdthgs;
+extern struct dthgs	*pdthgs;
 
 void
 open_thgs(struct thgsd *pthgsd, bool reconn)
@@ -54,7 +54,7 @@ open_thgs(struct thgsd *pthgsd, bool reconn)
 			fd = open(thg->location, O_RDWR | O_NONBLOCK | O_NOCTTY
 			    | O_NDELAY);
 			if (fd == -1) {
-				log_info("failed to open %s", thg->location);
+				log_warnx("failed to open %s", thg->location);
 				if (reconn)
 					return;
 				dthg = new_dthg(thg);
@@ -192,7 +192,7 @@ open_thgs(struct thgsd *pthgsd, bool reconn)
 				/* Set the new options for the port */
 				tcsetattr(fd, TCSANOW, &s_opts);
 				if ((thg->fd = fd) == '\0') {
-					log_info("serial device not opened");
+					log_warnx("serial device not opened");
 					if (reconn)
 						return;
 					thg->exists = false;

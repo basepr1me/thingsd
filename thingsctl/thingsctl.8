@@ -14,20 +14,62 @@
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
 
-.Dd $Mdocdate: January 26 2019 $
-.Dt THINGSCTL 1
+.Dd $Mdocdate: April 17 2019 $
+.Dt THINGSCTL 8
 .Os
 .Sh NAME
 .Nm thingsctl
-.Nd thingsd control utility
+.Nd control the thingsd daemon
 .Sh SYNOPSIS
-.Nm thingsctl
-.Op Fl sv
-.Op Fl d Ar host : Ns Ar port
-.Op Fl f Ar thing
-.Op Ar command args ...
+.Nm
+.Op Fl s Ar socket
+.Ar command
+.Op Ar argument ...
 .Sh DESCRIPTION
 The
 .Nm
-program is a control utility for the thingsd proxy daemon.
+program controls the
+.Xr thingsd 8
+daemon.
 .Pp
+The following options are available:
+.Bl -tag -width Ds
+.It Fl s Ar socket
+Use
+.Ar socket
+instead of the default
+.Pa /var/run/thingsd.sock
+to communicate with
+.Xr thingsd 8 .
+.El
+.Pp
+The following commands are available:
+.Bl -tag -width Ds
+.It Cm log brief
+Disable verbose logging.
+.It Cm log verbose
+Enable verbose logging.
+.It Cm log debug
+Enable very noisy debug logging.
+.It Cm list clients
+Show all clients connected to things.
+.It Cm list things
+Show all things. This will not list non-persistent things.
+.It Cm list sockets
+Show a summary of all sockets being used by the thingsd daemon.
+.El
+.Sh FILES
+.Bl -tag -width "/var/run/thingsd.sockXX" -compact
+.It Pa /var/run/thingsd.sock
+.Ux Ns -domain
+socket used for communication with
+.Xr thingsd 8 .
+.El
+.Sh SEE ALSO
+.Xr thingsd.conf 5 ,
+.Xr thingsd 8
+.Sh HISTORY
+The
+.Nm
+program first appeared in
+.Ox 6.5 .
