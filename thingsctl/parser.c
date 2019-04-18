@@ -70,11 +70,6 @@ static const struct token t_list[] = {
 	{ENDTOKEN,	"",		NONE,			NULL}
 };
 
-/* static const struct token t_list[] = { */
-/* 	{NOTOKEN,	"",		NONE,			NULL}, */
-/* 	{ENDTOKEN,	"",		LIST,			NULL} */
-/* }; */
-
 static const struct token *match_token(const char *, const struct token *,
     struct parse_result *);
 static void show_valid_args(const struct token *);

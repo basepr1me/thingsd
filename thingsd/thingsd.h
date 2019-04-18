@@ -52,6 +52,8 @@
 #define TLSFLAG_OPTIONAL	0x04
 #define TLSFLAG_BITS		"\10\01CA\02CRL\03OPTIONAL"
 
+#define PARENT_SOCK_FD		 (STDERR_FILENO + 1)
+
 enum socktypes {
 	TCP,
 	UDP,
@@ -224,36 +226,34 @@ struct thgsd {
 	bool			 exists;
 	int			 dcount;
 
-	/* signal handlers */
-	struct event		 evsigquit;
-	struct event		 evsigterm;
-	struct event		 evsigint;
-	struct event		 evsighup;
-
-	/* ctl */
-	struct event_base	*ctl_eb;
-	struct event		 ctl_evsigquit;
-	struct event		 ctl_evsigterm;
-	struct event		 ctl_evsigint;
+	/* thgs */
+	struct event_base	*thgs_eb;
+	struct event		 thgs_evsigquit;
+	struct event		 thgs_evsigterm;
+	struct event		 thgs_evsigint;
 };
+
+/* thingsd.c */
+int			 	 main_imsg_compose_thgs(int, pid_t, void *,
+				    uint16_t);
 
 /* control.c */
 #define IMSG_DATA_SIZE(imsg)    ((imsg).hdr.len - IMSG_HEADER_SIZE)
 
 enum {
 	PROC_MAIN,
-	PROC_CTL,
+	PROC_THGS,
 } thgsd_process;
 
 static const char * const log_procnames[] = {
-	"thingsd main",
-	"thingsd control",
+	"main",
+	"things",
 };
 
-enum ctl_list_type {
-	CTL_LIST_CLTS,
-	CTL_LIST_THGS,
-	CTL_LIST_SOCKS,
+enum thgs_list_type {
+	THGS_LIST_CLTS,
+	THGS_LIST_THGS,
+	THGS_LIST_SOCKS,
 };
 
 struct imsgev {
@@ -273,9 +273,9 @@ TAILQ_HEAD(ctl_conns, ctl_conn)	ctl_conns;
 
 enum imsg_type {
 	IMSG_NONE,
-	IMSG_CTL_LOG_VERBOSE,
-	IMSG_CTL_LIST,
 	IMSG_CTL_END,
+	IMSG_THGS_LOG_VERBOSE,
+	IMSG_THGS_LIST,
 	IMSG_LIST_CLTS,
 	IMSG_LIST_THGS,
 	IMSG_LIST_SOCKS,
@@ -289,12 +289,10 @@ void				 imsg_event_add(struct imsgev *);
 int				 imsg_compose_event(struct imsgev *, uint16_t,
 				    uint32_t, pid_t, int, void *, uint16_t);
 
-/* ctl.c */
-void             		 thgs_ctl(int, int, char*);
-
-/* thingsd.c */
-struct dthg			*new_dthg(struct thg *);
+/* thgs.c */
+void             		 thgs_main(int, int, char*);
 void				 add_reconn(struct thg *);
+struct dthg			*new_dthg(struct thg *);
 
 /* parse.y */
 struct thg			*new_thg(char *);
@@ -314,9 +312,6 @@ void				 sock_wr(struct bufferevent *, void *);
 void				 sock_err(struct bufferevent *, short, void *);
 int				 create_sock(int, char *, int);
 int				 open_clt_sock(char *, int);
-
-/* things.c */
-pid_t				 thgs_main(struct thgsd *, const char *);
 
 /* events.c */
 void				 udp_evt(int, short, void *);

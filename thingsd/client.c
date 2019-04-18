@@ -133,7 +133,6 @@ clt_add(struct thgsd *pthgsd, struct clt *pclt)
 		event_set(&clt->bev->ev_write, clt->fd, EV_WRITE,
 		    clt_tls_writecb, clt->bev);
 	}
-	bufferevent_base_set(pthgsd->eb, clt->bev);
 	bufferevent_setwatermark(clt->bev, EV_READ, 0, BUFF);
 	bufferevent_enable(clt->bev, EV_READ);
 	start_clt_chk(pthgsd);

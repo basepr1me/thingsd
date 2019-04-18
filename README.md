@@ -41,6 +41,8 @@ Compile and install.
 
 		make
 		make install
+		doas addgroup _thingsd
+		doas useradd -d /var/empty -L daemon -g _thingsd -s /sbin/nologin _thingsd
 		doas cp examples/etc/rc.d/thingsd /etc/rc.d/
 
 Edit thingsd.conf according to `man thingsd.conf`. Your settings will depend

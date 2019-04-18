@@ -16,9 +16,16 @@
 
 #include "thingsd.h"
 
-void			 ctl_sighdlr(int, short, void *);
-void			 ctl_shutdown(struct dthgs *);
-void			 ctl_dispatch_main(int, short, void *);
+void			 thgs_sighdlr(int, short, void *);
+void			 thgs_shutdown(struct dthgs *);
+void			 thgs_dispatch_main(int, short, void *);
+void			 do_reconn(void);
+void			 show_list(enum thgs_list_type, pid_t);
 
-/* ctl.c */
-int		 	 ctl_imsg_compose_main(int, pid_t, void *, uint16_t);
+/* things.c */
+int		 	 thgs_imsg_compose_main(int, pid_t, void *, uint16_t);
+struct thgsd		*pthgsd;
+struct dthgs		*pdthgs;
+struct thg_imsg		*compose_thgs(struct thg *);
+struct clt_imsg		*compose_clts(struct clt *);
+struct sock_imsg	*compose_socks(struct sock *);

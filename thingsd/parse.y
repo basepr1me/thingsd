@@ -159,7 +159,7 @@ subthgs		: THING '{' STRING ',' STRING '}' optcomma {
 				if (strcmp(clt->name, my_name) == 0) {
 					if (my_fd != clt->fd) {
 						fail = true;
-						log_warn("client exists");
+						log_warnx("client exists");
 					}
 					for (n = 0; n < clt->le; n++)
 						if (strcmp(clt->sub_names[n],

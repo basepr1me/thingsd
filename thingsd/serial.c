@@ -47,9 +47,8 @@ open_thgs(struct thgsd *pthgsd, bool reconn)
 			thg->type = DEV;
 			/*
 			 * Just a reminder to set the ownership of your serial
-			 * devices to _thingsd. Otherwise, a disconnected
-			 * and reconnected thing will not be able to
-			 * successfully open(2) the file descriptor.
+			 * devices to _thingsd. Otherwise, a thing will not be
+			 * able to successfully open(2) the file descriptor.
 			 */
 			fd = open(thg->location, O_RDWR | O_NONBLOCK | O_NOCTTY
 			    | O_NDELAY);
@@ -201,7 +200,6 @@ open_thgs(struct thgsd *pthgsd, bool reconn)
 				}
 				thg->bev = bufferevent_new(thg->fd, sockrd,
 				    sockwr, sock_err, pthgsd);
-				bufferevent_base_set(pthgsd->eb, thg->bev);
 				if (thg->bev == NULL)
 					fatalx("ipaddr bev error");
 				thg->evb = evbuffer_new();

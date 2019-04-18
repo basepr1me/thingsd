@@ -126,24 +126,24 @@ main(int argc, char *argv[])
 		verbose++;
 		/* FALLTHROUGH */
 	case LOG_BRIEF:
-		imsg_compose(ibuf, IMSG_CTL_LOG_VERBOSE, 0, 0, -1,
+		imsg_compose(ibuf, IMSG_THGS_LOG_VERBOSE, 0, 0, -1,
 		    &verbose, sizeof(verbose));
 		printf("logging request sent\n");
 		done = 1;
 		break;
 	case LIST_CLTS:
-		type = CTL_LIST_CLTS;
-		imsg_compose(ibuf, IMSG_CTL_LIST, 0, 0, -1, &type,
+		type = THGS_LIST_CLTS;
+		imsg_compose(ibuf, IMSG_THGS_LIST, 0, 0, -1, &type,
 		    sizeof(type));
 		break;
 	case LIST_THGS:
-		type = CTL_LIST_THGS;
-		imsg_compose(ibuf, IMSG_CTL_LIST, 0, 0, -1, &type,
+		type = THGS_LIST_THGS;
+		imsg_compose(ibuf, IMSG_THGS_LIST, 0, 0, -1, &type,
 		    sizeof(type));
 		break;
 	case LIST_SOCKS:
-		type = CTL_LIST_SOCKS;
-		imsg_compose(ibuf, IMSG_CTL_LIST, 0, 0, -1, &type,
+		type = THGS_LIST_SOCKS;
+		imsg_compose(ibuf, IMSG_THGS_LIST, 0, 0, -1, &type,
 		    sizeof(type));
 		break;
 	default:

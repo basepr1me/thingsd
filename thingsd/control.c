@@ -27,7 +27,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "ctl.h"
+#include "things.h"
 #include "thingsd.h"
 #include "control.h"
 
@@ -241,19 +241,19 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		}
 
 		switch (imsg.hdr.type) {
-		case IMSG_CTL_LIST:
+		case IMSG_THGS_LIST:
 			if (IMSG_DATA_SIZE(imsg) !=
-			    sizeof(enum ctl_list_type))
+			    sizeof(enum thgs_list_type))
 				break;
-			ctl_imsg_compose_main(imsg.hdr.type, 0,
+			main_imsg_compose_thgs(imsg.hdr.type, 0,
 			    imsg.data, IMSG_DATA_SIZE(imsg));
 			break;
-		case IMSG_CTL_LOG_VERBOSE:
+		case IMSG_THGS_LOG_VERBOSE:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE +
 			    sizeof(verbose))
 				break;
 			/* forward to other process */
-			ctl_imsg_compose_main(imsg.hdr.type, 0,
+			main_imsg_compose_thgs(imsg.hdr.type, 0,
 			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			memcpy(&verbose, imsg.data, sizeof(verbose));
 			log_setverbose(verbose);
