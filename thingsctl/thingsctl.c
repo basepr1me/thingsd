@@ -263,10 +263,7 @@ print_thgs(struct thg_imsg *pthgs)
 		printf("\tMax Clients:\t\tunlimited\n");
 	else
 		printf("\tMax Clients:\t\t%d\n", pthgs->max_clt);
-	if (geteuid() != 0)
-		printf("\tPassword:\t\t********\n");
-	else
-		printf("\tPassword:\t\t%s\n", pthgs->password);
+	printf("\tPassword:\t\t%s\n", pthgs->password);
 	printf("\tClient Count:\t\t%zu\n", pthgs->clt_cnt);
 	if (pthgs->tls == false)
 		return;

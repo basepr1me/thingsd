@@ -198,6 +198,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 {
 	struct ctl_conn		*c;
 	struct imsg		 imsg;
+	enum thgs_list_type	 type;
 	ssize_t			 n;
 	uid_t			 euid;
 	gid_t			 egid;
@@ -236,6 +237,13 @@ control_dispatch_imsg(int fd, short event, void *bula)
 			break;
 
 		switch (imsg.hdr.type) {
+		case IMSG_THGS_LOG_VERBOSE:
+			if (euid != 0) {
+				imsg_free(&imsg);
+				control_close(fd);
+				return;
+			}
+			break;
 		default:
 			break;
 		}
@@ -245,8 +253,15 @@ control_dispatch_imsg(int fd, short event, void *bula)
 			if (IMSG_DATA_SIZE(imsg) !=
 			    sizeof(enum thgs_list_type))
 				break;
-			main_imsg_compose_thgs(imsg.hdr.type, 0,
-			    imsg.data, IMSG_DATA_SIZE(imsg));
+			memcpy(&type, imsg.data, sizeof(type));
+			if (type == THGS_LIST_THGS && euid == 0) {
+				type = THGS_LIST_THGS_ROOT;
+				main_imsg_compose_thgs(imsg.hdr.type, 0,
+				    &type, sizeof(type));
+			}
+			else
+				main_imsg_compose_thgs(imsg.hdr.type, 0,
+				    imsg.data, IMSG_DATA_SIZE(imsg));
 			break;
 		case IMSG_THGS_LOG_VERBOSE:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE +

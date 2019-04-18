@@ -315,9 +315,10 @@ show_list(enum thgs_list_type type, pid_t pid)
 			free(clt_imsg);
 		}
 		break;
+	case THGS_LIST_THGS_ROOT:
 	case THGS_LIST_THGS:
 		TAILQ_FOREACH(thg, &pthgsd->thgs, entry) {
-			thg_imsg = compose_thgs(thg);
+			thg_imsg = compose_thgs(thg, type);
 			thgs_imsg_compose_main(IMSG_LIST_THGS, pid, thg_imsg,
 			    sizeof(*thg_imsg));
 			free(thg_imsg);
@@ -359,9 +360,10 @@ compose_clts(struct clt *pclt)
 };
 
 struct thg_imsg *
-compose_thgs(struct thg *pthg)
+compose_thgs(struct thg *pthg, int type)
 {
 	struct thg_imsg		*comp_thg;
+	char			*blank = "********";
 
 	if ((comp_thg = calloc(1, sizeof(*comp_thg))) == NULL)
 		fatalx("no com_thg calloc");
@@ -378,8 +380,16 @@ compose_thgs(struct thg *pthg)
 		strlcpy(comp_thg->name, pthg->name, BUFF);
 	if (pthg->parity != NULL)
 		strlcpy(comp_thg->parity, pthg->parity, BUFF);
-	if (pthg->password != NULL)
-		strlcpy(comp_thg->password, pthg->password, BUFF);
+	if (pthg->password != NULL) {
+		switch (type) {
+		case THGS_LIST_THGS_ROOT:
+			strlcpy(comp_thg->password, pthg->password, BUFF);
+			break;
+		case THGS_LIST_THGS:
+			strlcpy(comp_thg->password, blank, BUFF);
+			break;
+		}
+	}
 	if (pthg->location != NULL)
 		strlcpy(comp_thg->location, pthg->location, BUFF);
 	if (pthg->udp != NULL)

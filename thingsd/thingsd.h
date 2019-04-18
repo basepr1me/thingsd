@@ -253,6 +253,7 @@ static const char * const log_procnames[] = {
 enum thgs_list_type {
 	THGS_LIST_CLTS,
 	THGS_LIST_THGS,
+	THGS_LIST_THGS_ROOT,
 	THGS_LIST_SOCKS,
 };
 
