@@ -23,7 +23,6 @@ void			 do_reconn(void);
 void			 show_list(enum thgs_list_type, pid_t);
 
 /* things.c */
-int		 	 thgs_imsg_compose_main(int, pid_t, void *, uint16_t);
 struct thgsd		*pthgsd;
 struct dthgs		*pdthgs;
 struct thg_imsg		*compose_thgs(struct thg *, int);

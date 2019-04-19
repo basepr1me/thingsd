@@ -31,6 +31,7 @@
 struct thgsd		*pthgsd;
 struct dthgs		*pdthgs;
 struct imsgev		*iev_main;
+struct ctl_pkt		*ctl_pkt;
 
 void
 thgs_sighdlr(int sig, short event, void *bula)
@@ -59,7 +60,8 @@ thgs_main(int debug, int verbose, char *thgs_sock)
 		fatalx("no thgsd calloc");
 	if ((pdthgs = calloc(1, sizeof(*pdthgs))) == NULL)
 		fatalx("no dthgs calloc");
-
+	if ((ctl_pkt = calloc(1, sizeof(*ctl_pkt))) == NULL)
+		fatalx("no ctl_pkt calloc");
 	if (parse_conf(PATH_CONF))
 		fatalx("config parsing failed");
 
@@ -72,6 +74,9 @@ thgs_main(int debug, int verbose, char *thgs_sock)
 			log_warn("unable to set user id of %s: %s", TH_USER,
 			    strerror(errno));
 	}
+
+	ctl_pkt->exists = false;
+	ctl_pkt->pid = -1;
 
 	pthgsd->thgs_eb = event_init();
 
@@ -125,6 +130,7 @@ thgs_main(int debug, int verbose, char *thgs_sock)
 void
 thgs_dispatch_main(int fd, short event, void *bula)
 {
+	struct clt		*clt;
 	struct imsg		 imsg;
 	struct imsgev		*iev = bula;
 	struct imsgbuf		*ibuf = &iev->ibuf;
@@ -151,6 +157,22 @@ thgs_dispatch_main(int fd, short event, void *bula)
 			break;
 
 		switch (imsg.hdr.type) {
+		case IMSG_SHOW_PKTS:
+			ctl_pkt->exists = true;
+			ctl_pkt->pid = imsg.hdr.pid;
+			break;
+		case IMSG_KILL_CLT:
+			TAILQ_FOREACH(clt, &pthgsd->clts, entry) {
+				if (imsg.data == NULL)
+					break;
+				if (strncmp(clt->name, imsg.data, BUFF) == 0) {
+					log_debug("Control killed client: %s",
+					    imsg.data);
+					clt_del(pthgsd, clt);
+					break;
+				}
+			}
+			break;
 		case IMSG_THGS_LIST:
 			if (IMSG_DATA_SIZE(imsg) != sizeof(type))
 				fatalx("%s: IMSG_THGS_STATUS wrong length: %lu",
@@ -227,6 +249,7 @@ thgs_shutdown(struct dthgs *zdthgs)
 	log_debug("%s child exiting", getprogname());
 	free(pdthgs);
 	free(pthgsd);
+	free(ctl_pkt);
 	exit(0);
 }
 

@@ -308,6 +308,7 @@ main_dispatch_thgs(int fd, short event, void *bula)
 			break;
 
 		switch (imsg.hdr.type) {
+		case IMSG_SHOW_PKTS:
 		case IMSG_LIST_CLTS:
 		case IMSG_LIST_THGS:
 		case IMSG_LIST_SOCKS:

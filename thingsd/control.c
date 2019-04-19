@@ -238,6 +238,8 @@ control_dispatch_imsg(int fd, short event, void *bula)
 
 		switch (imsg.hdr.type) {
 		case IMSG_THGS_LOG_VERBOSE:
+		case IMSG_KILL_CLT:
+		case IMSG_SHOW_PKTS:
 			if (euid != 0) {
 				imsg_free(&imsg);
 				control_close(fd);
@@ -249,6 +251,14 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		}
 
 		switch (imsg.hdr.type) {
+		case IMSG_SHOW_PKTS:
+			main_imsg_compose_thgs(imsg.hdr.type, imsg.hdr.pid,
+			    imsg.data, IMSG_DATA_SIZE(imsg));
+			break;
+		case IMSG_KILL_CLT:
+			main_imsg_compose_thgs(imsg.hdr.type, 0, imsg.data,
+			    IMSG_DATA_SIZE(imsg));
+			break;
 		case IMSG_THGS_LIST:
 			if (IMSG_DATA_SIZE(imsg) !=
 			    sizeof(enum thgs_list_type))

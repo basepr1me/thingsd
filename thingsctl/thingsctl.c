@@ -110,6 +110,8 @@ main(int argc, char *argv[])
 	case LOG_DEBUG:
 	case LOG_VERBOSE:
 	case LOG_BRIEF:
+	case KILL_CLT:
+	case SHOW_PKTS:
 		if (geteuid() != 0)
 			errx(1, "need root privileges");
 		break;
@@ -119,6 +121,16 @@ main(int argc, char *argv[])
 
 	/* Process user request. */
 	switch (res->action) {
+	case SHOW_PKTS:
+		imsg_compose(ibuf, IMSG_SHOW_PKTS, 0, 0, -1,
+		    res->thg_name, sizeof(res->thg_name));
+		break;
+	case KILL_CLT:
+		imsg_compose(ibuf, IMSG_KILL_CLT, 0, 0, -1,
+		    res->clt_name, sizeof(res->clt_name));
+		printf("kill request for client \"%s\" sent\n", res->clt_name);
+		done = 1;
+		break;
 	case LOG_DEBUG:
 		verbose++;
 		/* FALLTHROUGH */
@@ -166,6 +178,9 @@ main(int argc, char *argv[])
 				break;
 
 			switch (res->action) {
+			case SHOW_PKTS:
+				printf("%s\n", (char *)imsg.data);
+				break;
 			case LIST_CLTS:
 			case LIST_THGS:
 			case LIST_SOCKS:

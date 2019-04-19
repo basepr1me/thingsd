@@ -264,6 +264,11 @@ struct imsgev {
 	short			 events;
 };
 
+struct ctl_pkt {
+	bool			 exists;
+	uint32_t		 pid;
+};
+
 int				 control_init(char *);
 int				 control_listen(void);
 void				 control_accept(int, short, void *);
@@ -281,9 +286,7 @@ enum imsg_type {
 	IMSG_LIST_THGS,
 	IMSG_LIST_SOCKS,
 	IMSG_KILL_CLT,
-	IMSG_ADD_THG,
-	IMSG_DEL_THG,
-	IMSG_SHOW_PKTS
+	IMSG_SHOW_PKTS,
 };
 
 void				 imsg_event_add(struct imsgev *);
@@ -294,6 +297,8 @@ int				 imsg_compose_event(struct imsgev *, uint16_t,
 void             		 thgs_main(int, int, char*);
 void				 add_reconn(struct thg *);
 struct dthg			*new_dthg(struct thg *);
+int			 	 thgs_imsg_compose_main(int, pid_t, void *,
+				    uint16_t);
 
 /* parse.y */
 struct thg			*new_thg(char *);

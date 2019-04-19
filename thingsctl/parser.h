@@ -23,10 +23,14 @@ enum actions {
 	LIST_CLTS,
 	LIST_THGS,
 	LIST_SOCKS,
+	KILL_CLT,
+	SHOW_PKTS,
 };
 
 struct parse_result {
-	enum actions	action;
+	char		*clt_name;
+	char		*thg_name;
+	enum actions	 action;
 };
 
 struct parse_result	*parse(int, char *[]);

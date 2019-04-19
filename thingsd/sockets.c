@@ -18,6 +18,7 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 
+#include <errno.h>
 #include <event.h>
 #include <ifaddrs.h>
 #include <fcntl.h>
@@ -31,6 +32,7 @@
 #include "thingsd.h"
 
 extern struct dthgs	*pdthgs;
+extern struct ctl_pkt	*ctl_pkt;
 
 void
 create_socks(struct thgsd *pthgsd, bool reconn)
@@ -331,7 +333,8 @@ sock_rd(struct bufferevent *bev, void *arg)
 	struct thg		*thg = NULL, *tthg;
 	struct clt		*clt;
 	size_t			 len;
-	int			 fd = bev->ev_read.ev_fd;
+	int			 fd = bev->ev_read.ev_fd, pid_chk;
+	bool			 ctl = false;
 	size_t			 n;
 	char			*pkt;
 
@@ -345,10 +348,24 @@ sock_rd(struct bufferevent *bev, void *arg)
 	len = EVBUFFER_LENGTH(thg->evb);
 	if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
 		return;
+	/* send pkt to control socket */
+	if (ctl_pkt->exists) {
+		pid_chk = kill(ctl_pkt->pid, 0);
+		if (pid_chk == -1 && errno > 1) {
+			ctl_pkt->exists = false;
+			ctl_pkt->pid = -1;
+			ctl = false;
+		} else {
+			ctl = true;
+			evbuffer_remove(thg->evb, pkt, len);
+			thgs_imsg_compose_main(IMSG_SHOW_PKTS, ctl_pkt->pid,
+			    pkt, len);
+		}
+	}
 	if (thg->clt_cnt == 0) {
 		evbuffer_drain(thg->evb, len);
 		return;
-	} else
+	} else if (ctl == false)
 		evbuffer_remove(thg->evb, pkt, len);
 	/*  write to clients */
 	TAILQ_FOREACH(clt, &pthgsd->clts, entry) {

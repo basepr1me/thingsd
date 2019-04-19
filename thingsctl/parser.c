@@ -36,7 +36,9 @@
 enum token_type {
 	NOTOKEN,
 	ENDTOKEN,
-	KEYWORD
+	KEYWORD,
+	CLTNAME,
+	THGNAME,
 };
 
 struct token {
@@ -49,10 +51,14 @@ struct token {
 static const struct token t_main[];
 static const struct token t_log[];
 static const struct token t_list[];
+static const struct token t_ctl_name[];
+static const struct token t_thg_name[];
 
 static const struct token t_main[] = {
 	{KEYWORD,	"list",		NONE,		t_list},
 	{KEYWORD,	"log",		NONE,		t_log},
+	{KEYWORD,	"kill",		KILL_CLT,	t_ctl_name},
+	{KEYWORD,	"show",		SHOW_PKTS,	t_thg_name},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -67,6 +73,16 @@ static const struct token t_list[] = {
 	{KEYWORD,	"clients",	LIST_CLTS,		NULL},
 	{KEYWORD,	"things",	LIST_THGS,		NULL},
 	{KEYWORD,	"sockets",	LIST_SOCKS,		NULL},
+	{ENDTOKEN,	"",		NONE,			NULL}
+};
+
+static const struct token t_ctl_name[] = {
+	{CLTNAME,	"",		NONE,			NULL},
+	{ENDTOKEN,	"",		NONE,			NULL}
+};
+
+static const struct token t_thg_name[] = {
+	{THGNAME,	"",		NONE,			NULL},
 	{ENDTOKEN,	"",		NONE,			NULL}
 };
 
@@ -133,6 +149,20 @@ match_token(const char *word, const struct token *table,
 					res->action = t->value;
 			}
 			break;
+		case CLTNAME:
+			if (!match && word != NULL && strlen(word) > 0) {
+				res->clt_name = strdup(word);
+				match++;
+				t = &table[i];
+			}
+			break;
+		case THGNAME:
+			if (!match && word != NULL && strlen(word) > 0) {
+				res->thg_name = strdup(word);
+				match++;
+				t = &table[i];
+			}
+			break;
 		case ENDTOKEN:
 			break;
 		}
@@ -163,6 +193,11 @@ show_valid_args(const struct token *table)
 			break;
 		case KEYWORD:
 			fprintf(stderr, "  %s\n", table[i].keyword);
+		case CLTNAME:
+			fprintf(stderr, " <client name>\n");
+			break;
+		case THGNAME:
+			fprintf(stderr, " <thing name>\n");
 			break;
 		case ENDTOKEN:
 			break;
