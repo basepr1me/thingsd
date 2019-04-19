@@ -193,6 +193,7 @@ show_valid_args(const struct token *table)
 			break;
 		case KEYWORD:
 			fprintf(stderr, "  %s\n", table[i].keyword);
+			break;
 		case CLTNAME:
 			fprintf(stderr, " <client name>\n");
 			break;
