@@ -329,7 +329,6 @@ clt_wr_thgs(struct clt *clt, struct thg *thg, size_t len)
 void
 clt_wr(struct bufferevent *bev, void *arg)
 {
-	/* nothing here */
 }
 
 void
@@ -412,7 +411,7 @@ void
 *clt_chk(void *arg)
 {
 	struct thgsd		*pthgsd = (struct thgsd *)arg;
-	void			 (*tfptr)(struct thgsd *);
+	void			(*tfptr)(struct thgsd *);
 
 	tfptr = pthgsd->clt_fptr;
 	sleep(CLT_SUB_TIME);

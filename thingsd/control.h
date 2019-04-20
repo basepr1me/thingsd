@@ -16,9 +16,6 @@
 
 #include "log.h"
 
-extern int		 	 main_imsg_compose_ctl(int, pid_t, void *,
-				    uint16_t);
-
 struct {
 	struct event		 ev;
 	struct event		 evt;

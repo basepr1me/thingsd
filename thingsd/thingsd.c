@@ -92,6 +92,7 @@ main(int argc, char *argv[])
 	log_setverbose(1);
 
 	saved_argv0 = argv[0];
+
 	if (saved_argv0 == NULL)
 		saved_argv0 = "thingsd";
 
@@ -112,17 +113,16 @@ main(int argc, char *argv[])
 	}
 
 	argc -= optind;
+
 	if (argc > 0)
 		usage();
-
 	if (thgs_chld)
 		thgs_main(debug, verbose, thgs_sock);
-
 	if (geteuid())
 		fatalx("need root privileges");
-
 	if ((control_fd = control_init(thgs_sock)) == -1)
 		fatalx("thgs_sock failed");
+
 	control_state.fd = control_fd;
 
 	log_init(debug, LOG_DAEMON);
@@ -160,6 +160,7 @@ main(int argc, char *argv[])
 	/* setup thgs child pipe */
 	if ((iev_thgs = malloc(sizeof(struct imsgev))) == NULL)
 		fatalx("iev_thgs malloc");
+
 	imsg_init(&iev_thgs->ibuf, pipe_thgs[0]);
 	iev_thgs->handler = main_dispatch_thgs;
 
@@ -171,7 +172,6 @@ main(int argc, char *argv[])
 
 	if (getpwnam(TH_USER) == NULL)
 		log_info("running as root. %s user not found", TH_USER);
-
 	if (pledge("stdio unix recvfd", NULL) == -1)
 		fatal("pledge");
 

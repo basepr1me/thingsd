@@ -33,6 +33,7 @@
 
 extern struct dthgs	*pdthgs;
 extern struct ctl_pkt	*ctl_pkt;
+extern bool		 ctl_conn;
 
 void
 create_socks(struct thgsd *pthgsd, bool reconn)
@@ -333,8 +334,7 @@ sock_rd(struct bufferevent *bev, void *arg)
 	struct thg		*thg = NULL, *tthg;
 	struct clt		*clt;
 	size_t			 len;
-	int			 fd = bev->ev_read.ev_fd, pid_chk;
-	bool			 ctl = false;
+	int			 fd = bev->ev_read.ev_fd, pchk;
 	size_t			 n;
 	char			*pkt;
 
@@ -349,23 +349,21 @@ sock_rd(struct bufferevent *bev, void *arg)
 	if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
 		return;
 	/* send pkt to control socket */
-	if (ctl_pkt->exists) {
-		pid_chk = kill(ctl_pkt->pid, 0);
-		if (pid_chk == -1 && errno > 1) {
-			ctl_pkt->exists = false;
-			ctl_pkt->pid = -1;
-			ctl = false;
-		} else {
-			ctl = true;
-			evbuffer_remove(thg->evb, pkt, len);
-			thgs_imsg_compose_main(IMSG_SHOW_PKTS, ctl_pkt->pid,
-			    pkt, len);
-		}
+	pchk = kill(ctl_pkt->cpid, 0);
+	if (pchk == -1 && errno > 1) {
+		ctl_pkt->exists = false;
+		ctl_pkt->cpid = -1;
+	}
+	if (ctl_pkt->exists && strncmp(thg->name, ctl_pkt->name,
+	    sizeof(*thg->name)) == 0) {
+		evbuffer_remove(thg->evb, pkt, len);
+		thgs_imsg_compose_main(IMSG_SHOW_PKTS, ctl_pkt->pid,
+		    pkt, len);
 	}
 	if (thg->clt_cnt == 0) {
 		evbuffer_drain(thg->evb, len);
 		return;
-	} else if (ctl == false)
+	} else if (ctl_pkt->exists == false)
 		evbuffer_remove(thg->evb, pkt, len);
 	/*  write to clients */
 	TAILQ_FOREACH(clt, &pthgsd->clts, entry) {

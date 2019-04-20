@@ -265,8 +265,10 @@ struct imsgev {
 };
 
 struct ctl_pkt {
+	pid_t			 pid;
+	pid_t			 cpid;
+	char			*name;
 	bool			 exists;
-	uint32_t		 pid;
 };
 
 int				 control_init(char *);

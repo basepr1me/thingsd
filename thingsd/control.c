@@ -33,9 +33,10 @@
 
 #define	CONTROL_BACKLOG	5
 
-struct ctl_conn			*control_connbyfd(int);
-struct ctl_conn			*control_connbypid(pid_t);
-void				 control_close(int);
+struct ctl_conn		*control_connbyfd(int);
+struct ctl_conn		*control_connbypid(pid_t);
+
+void			 control_close(int);
 
 int
 control_init(char *path)
@@ -173,6 +174,7 @@ control_close(int fd)
 {
 	struct ctl_conn		*c;
 
+	/* main_imsg_compose_thgs(IMSG_CTL_CONN, 0, false, 1); */
 	if ((c = control_connbyfd(fd)) == NULL) {
 		log_warnx("%s: fd %d: not found", __func__, fd);
 		return;

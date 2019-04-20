@@ -76,7 +76,8 @@ thgs_main(int debug, int verbose, char *thgs_sock)
 	}
 
 	ctl_pkt->exists = false;
-	ctl_pkt->pid = -1;
+	ctl_pkt->pid = getppid();
+	ctl_pkt->cpid = -1;
 
 	pthgsd->thgs_eb = event_init();
 
@@ -122,6 +123,8 @@ thgs_main(int debug, int verbose, char *thgs_sock)
 		}
 		event_base_loopexit(pthgsd->thgs_eb, &eb_timeout);
 		event_base_dispatch(pthgsd->thgs_eb);
+		if (getppid() == 1)
+			break;
 	}
 
 	thgs_shutdown(pdthgs);
@@ -131,11 +134,13 @@ void
 thgs_dispatch_main(int fd, short event, void *bula)
 {
 	struct clt		*clt;
+	struct thg		*thg;
 	struct imsg		 imsg;
 	struct imsgev		*iev = bula;
 	struct imsgbuf		*ibuf = &iev->ibuf;
 	enum thgs_list_type	 type;
 	int			 n, shut = 0, verbose;
+	bool			 tchk = true;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
@@ -158,8 +163,21 @@ thgs_dispatch_main(int fd, short event, void *bula)
 
 		switch (imsg.hdr.type) {
 		case IMSG_SHOW_PKTS:
-			ctl_pkt->exists = true;
-			ctl_pkt->pid = imsg.hdr.pid;
+			TAILQ_FOREACH(thg, &pthgsd->thgs, entry) {
+				if (strncmp(thg->name, imsg.data,
+				    sizeof(imsg.data)) == 0) {
+					if ((ctl_pkt->name =
+					    strdup(imsg.data)) == NULL)
+						break;
+					ctl_pkt->exists = true;
+					ctl_pkt->cpid = imsg.hdr.pid;
+					tchk = false;
+					break;
+				}
+			}
+			if (tchk)
+				thgs_imsg_compose_main(IMSG_CTL_END,
+				    ctl_pkt->pid, NULL, 0);
 			break;
 		case IMSG_KILL_CLT:
 			TAILQ_FOREACH(clt, &pthgsd->clts, entry) {
@@ -390,6 +408,7 @@ compose_thgs(struct thg *pthg, int type)
 
 	if ((comp_thg = calloc(1, sizeof(*comp_thg))) == NULL)
 		fatalx("no com_thg calloc");
+
 	comp_thg->exists = pthg->exists;
 	comp_thg->hw_ctl = pthg->hw_ctl;
 	comp_thg->persist = pthg->persist;
@@ -427,7 +446,6 @@ compose_thgs(struct thg *pthg, int type)
 	comp_thg->stop_bits = pthg->stop_bits;
 	comp_thg->type = pthg->type;
 	comp_thg->clt_cnt = pthg->clt_cnt;
-
 	comp_thg->tls = pthg->tls;
 
 	if (pthg->tls_cert_file != NULL)

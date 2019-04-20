@@ -46,7 +46,7 @@ void			 print_socks(struct sock_imsg *);
 
 struct imsgbuf		*ibuf;
 
-	__dead void
+__dead void
 usage(void)
 {
 	extern char *__progname;
@@ -179,6 +179,10 @@ main(int argc, char *argv[])
 
 			switch (res->action) {
 			case SHOW_PKTS:
+				if (imsg.hdr.type == IMSG_CTL_END) {
+					done = 1;
+					break;
+				}
 				printf("%s\n", (char *)imsg.data);
 				break;
 			case LIST_CLTS:
@@ -233,7 +237,6 @@ print_clts(struct clt_imsg *pclts)
 		return;
 
 	printf("Client Name:\t\t\t%s\n", pclts->name);
-
 	printf("\tfd:\t\t\t%d\n", pclts->fd);
 	printf("\tPort:\t\t\t%d\n", pclts->port);
 	if (pclts->tls == true)
@@ -248,7 +251,6 @@ print_thgs(struct thg_imsg *pthgs)
 		return;
 
 	printf("Thing Name:\t\t\t%s\n", pthgs->name);
-
 	switch(pthgs->type) {
 	case TCP:
 		printf("\tIP Addr:\t\t%s\n", pthgs->ipaddr);
