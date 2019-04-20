@@ -42,15 +42,18 @@
 #define EB_TIMEOUT		 10
 
 #define TLS_CONFIG_MAX		 511
-#define TLS_CERT		"/etc/ssl/thing.crt"
-#define TLS_KEY			"/etc/ssl/private/thing.key"
-#define TLS_CIPHERS		"compat"
-#define TLS_DHE_PARAMS		"none"
-#define TLS_ECDHE_CURVES	"default"
-#define TLSFLAG_CA		0x01
-#define TLSFLAG_CRL		0x02
-#define TLSFLAG_OPTIONAL	0x04
-#define TLSFLAG_BITS		"\10\01CA\02CRL\03OPTIONAL"
+#define TLS_CERT		 "/etc/ssl/thing.crt"
+#define TLS_KEY			 "/etc/ssl/private/thing.key"
+#define TLS_CIPHERS		 "compat"
+#define TLS_DHE_PARAMS		 "none"
+#define TLS_ECDHE_CURVES	 "default"
+#define TLSFLAG_CA		 0x01
+#define TLSFLAG_CRL		 0x02
+#define TLSFLAG_OPTIONAL	 0x04
+#define TLSFLAG_BITS		 "\10\01CA\02CRL\03OPTIONAL"
+
+#define L_VERBOSE1		 0x00000001
+#define L_VERBOSE2		 0x00000002
 
 #define PARENT_SOCK_FD		 (STDERR_FILENO + 1)
 
@@ -215,11 +218,9 @@ struct thgsd {
 	char			*iface;
 	int			 max_clt;
 	int			 port;
-	size_t			 debug;
 	size_t			 clt_cnt;
 	size_t			 conn_rtry;
 	size_t			 max_sub;
-	size_t			 verbose;
 	void			 (*clt_fptr)(struct thgsd *);
 
 	/* disconnected things parts */

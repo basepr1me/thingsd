@@ -84,8 +84,6 @@ thgs_main(int debug, int verbose, char *thgs_sock)
 	open_thgs(pthgsd, false);
 	create_socks(pthgsd, false);
 
-	pthgsd->verbose = verbose;
-	pthgsd->debug = debug;
 	pdthgs->run = 1;
 
 	if (unveil("/dev", "rw") == -1)
@@ -121,10 +119,10 @@ thgs_main(int debug, int verbose, char *thgs_sock)
 		if (pthgsd->exists) {
 			do_reconn();
 		}
-		event_base_loopexit(pthgsd->thgs_eb, &eb_timeout);
-		event_base_dispatch(pthgsd->thgs_eb);
 		if (getppid() == 1)
 			break;
+		event_base_loopexit(pthgsd->thgs_eb, &eb_timeout);
+		event_base_dispatch(pthgsd->thgs_eb);
 	}
 
 	thgs_shutdown(pdthgs);
@@ -213,9 +211,9 @@ thgs_dispatch_main(int fd, short event, void *bula)
 		imsg_event_add(iev);
 	else {
 		/* This pipe is dead. Remove its event handler. */
-		log_warnx("%s: pipe to main dead, event deleted", __func__);
 		event_del(&iev->ev);
 		event_loopexit(NULL);
+		pdthgs->run = 0;
 	}
 }
 

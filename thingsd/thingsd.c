@@ -52,6 +52,8 @@ struct event		 evsighup;
 pid_t			 thgs_pid;
 static struct imsgev	*iev_thgs;
 
+uint32_t	 v_opts;
+
 __dead void
 usage(void)
 {
@@ -82,7 +84,7 @@ main(int argc, char *argv[])
 {
 	int			 ch;
 	char			*thgs_sock, *saved_argv0;
-	int			 pipe_thgs[2], debug = 0, verbose = 0;
+	int			 pipe_thgs[2], debug = 0;
 	int			 control_fd;
 
 	thgs_sock = THINGSD_SOCK;
@@ -102,10 +104,12 @@ main(int argc, char *argv[])
 			thgs_chld = true;
 			break;
 		case 'd':
-			debug++;
+			debug = 1;
 			break;
 		case 'v':
-			verbose++;
+			if (v_opts & L_VERBOSE1)
+				v_opts |= L_VERBOSE2;
+			v_opts |= L_VERBOSE1;
 			break;
 		default:
 			usage();
@@ -117,7 +121,7 @@ main(int argc, char *argv[])
 	if (argc > 0)
 		usage();
 	if (thgs_chld)
-		thgs_main(debug, verbose, thgs_sock);
+		thgs_main(debug, v_opts & (L_VERBOSE1 | L_VERBOSE2), thgs_sock);
 	if (geteuid())
 		fatalx("need root privileges");
 	if ((control_fd = control_init(thgs_sock)) == -1)
@@ -126,7 +130,7 @@ main(int argc, char *argv[])
 	control_state.fd = control_fd;
 
 	log_init(debug, LOG_DAEMON);
-	log_setverbose(verbose);
+	log_setverbose(v_opts & L_VERBOSE1);
 
 	/* make parent daemon */
 	thgsd_process = PROC_MAIN;
@@ -142,7 +146,7 @@ main(int argc, char *argv[])
 		fatalx("thgs socketpair");
 
 	thgs_pid = start_child(PROC_THGS, saved_argv0, pipe_thgs[1], debug,
-	    verbose);
+	    v_opts & (L_VERBOSE1 | L_VERBOSE2));
 
 	event_init();
 
@@ -212,10 +216,9 @@ thgsd_shutdown()
 static pid_t
 start_child(int p, char *argv0, int fd, int debug, int verbose)
 {
-	int			 argc = 0, argvc = 10, ac;
-	char			*argv[argvc], bufa[argvc], bufb[argvc];
+	int			 argc = 0, argvc = 10;
+	char			*argv[argvc];
 	pid_t			 pid;
-	const char		*dash = "-";
 
 	switch (pid = fork()) {
 	case -1:
@@ -241,26 +244,12 @@ start_child(int p, char *argv0, int fd, int debug, int verbose)
 		argv[argc++] = "-C";
 		break;
 	}
-	memset(bufa, 0, sizeof(bufa));
-	memset(bufb, 0, sizeof(bufb));
-	if (debug) {
-		strlcpy(bufa, dash, sizeof(bufa));
-		for (ac = 0; ac < debug; ac++) {
-			if (ac >= argvc)
-				continue;
-			strlcat(bufa, "d", sizeof(bufa));
-		}
-		argv[argc++] = bufa;
-	}
-	if (verbose) {
-		strlcpy(bufb, dash, sizeof(bufb));
-		for (ac = 0; ac < verbose; ac++) {
-			if (ac >= argvc)
-				continue;
-			strlcat(bufb, "v", sizeof(bufb));
-		}
-		argv[argc++] = bufb;
-	}
+	if (debug)
+		argv[argc++] = "-d";
+	if (verbose & L_VERBOSE1)
+		argv[argc++] = "-v";
+	if (verbose & L_VERBOSE2)
+		argv[argc++] = "-v";
 	argv[argc++] = NULL;
 
 	execvp(argv0, argv);
@@ -298,7 +287,7 @@ main_dispatch_thgs(int fd, short event, void *bula)
 	struct imsgbuf		*ibuf = &iev->ibuf;
 	struct imsg		 imsg;
 	ssize_t			 n;
-	int			 shut = 0, verbose;
+	int			 shut = 0;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
@@ -328,10 +317,6 @@ main_dispatch_thgs(int fd, short event, void *bula)
 		case IMSG_CTL_END:
 			control_imsg_relay(&imsg);
 			break;
-		case IMSG_THGS_LOG_VERBOSE:
-			memcpy(&verbose, imsg.data, sizeof(verbose));
-			log_setverbose(verbose);
-			break;
 		default:
 			log_debug("%s: error handling imsg %d", __func__,
 			    imsg.hdr.type);
@@ -343,7 +328,6 @@ main_dispatch_thgs(int fd, short event, void *bula)
 		imsg_event_add(iev);
 	else {
 		/* this pipe is dead, so remove the event handler */
-		log_warnx("%s: pipe to thgs dead, event deleted", __func__);
 		event_del(&iev->ev);
 		event_loopexit(NULL);
 	}

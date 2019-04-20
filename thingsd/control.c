@@ -276,14 +276,14 @@ control_dispatch_imsg(int fd, short event, void *bula)
 				    imsg.data, IMSG_DATA_SIZE(imsg));
 			break;
 		case IMSG_THGS_LOG_VERBOSE:
-			if (imsg.hdr.len != IMSG_HEADER_SIZE +
-			    sizeof(verbose))
+			if (IMSG_DATA_SIZE(imsg) != sizeof(verbose))
 				break;
 			/* forward to other process */
+			main_imsg_compose_thgs(imsg.hdr.type, 0,
+			    imsg.data, IMSG_DATA_SIZE(imsg));
+
 			memcpy(&verbose, imsg.data, sizeof(verbose));
 			log_setverbose(verbose);
-			main_imsg_compose_thgs(imsg.hdr.type, 0,
-			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			break;
 		default:
 			log_debug("%s: error handling imsg %d", __func__,

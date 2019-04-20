@@ -92,7 +92,7 @@ typedef struct {
 %}
 
 %token	BAUD DATA PARITY STOP HARDWARE SOFTWARE PASSWORD NAME RETRY PERSISTENT
-%token	LOG VERBOSE CONNECT THING LISTEN LOCATION IPADDR UDP THINGS CONNECTION
+%token	VERBOSE CONNECT THING LISTEN LOCATION IPADDR UDP THINGS CONNECTION
 %token	DEFAULT PORT MAX CLIENTS SUBSCRIPTIONS BIND INTERFACE SUBSCRIBE TLS
 %token	ERROR RECEIVE CERTIFICATE CIPHERS CLIENT CA CRL OPTIONAL DHE ECDHE KEY
 %token	OCSP PROTOCOLS ON
@@ -122,7 +122,6 @@ main		: DEFAULT PORT NUMBER {
 		| maxclients
 		| maxsubs
 		| bindopts1
-		| logging
 		| thing
 		| thgretry
 		;
@@ -199,11 +198,6 @@ subthgs		: THING '{' STRING ',' STRING '}' optcomma {
 						continue;
 					}
 			}
-		}
-		;
-logging		: LOG VERBOSE NUMBER {
-	 		if (pthgsd->debug == 0)
-				pthgsd->verbose = $3;
 		}
 		;
 bindopts1	: BIND INTERFACE STRING {
@@ -561,7 +555,6 @@ int lookup(char *s) {
 		{ "key",		KEY },
 		{ "listen",		LISTEN },
 		{ "location",		LOCATION },
-		{ "log",		LOG },
 		{ "max",		MAX },
 		{ "name",		NAME },
 		{ "ocsp",		OCSP },

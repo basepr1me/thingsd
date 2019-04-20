@@ -132,10 +132,10 @@ main(int argc, char *argv[])
 		done = 1;
 		break;
 	case LOG_DEBUG:
-		verbose++;
+		verbose |= L_VERBOSE2;
 		/* FALLTHROUGH */
 	case LOG_VERBOSE:
-		verbose++;
+		verbose |= L_VERBOSE1;
 		/* FALLTHROUGH */
 	case LOG_BRIEF:
 		imsg_compose(ibuf, IMSG_THGS_LOG_VERBOSE, 0, 0, -1,
