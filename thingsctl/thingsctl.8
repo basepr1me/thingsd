@@ -13,8 +13,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-
-.Dd $Mdocdate: April 17 2019 $
+.Dd $Mdocdate: April 20 2019 $
 .Dt THINGSCTL 8
 .Os
 .Sh NAME
@@ -45,18 +44,25 @@ to communicate with
 .Pp
 The following commands are available:
 .Bl -tag -width Ds
-.It Cm log brief
-Disable verbose logging.
-.It Cm log verbose
-Enable verbose logging.
-.It Cm log debug
-Enable very noisy debug logging.
 .It Cm list clients
 Show all clients connected to things.
-.It Cm list things
-Show all things. This will not list non-persistent things.
 .It Cm list sockets
 Show a summary of all sockets being used by the thingsd daemon.
+.It Cm list things
+Show all things.
+This will not list non-persistent things.
+.It Cm log brief
+Disable verbose logging.
+.It Cm log debug
+Enable very noisy debug logging.
+.It Cm log verbose
+Enable verbose logging.
+.It Cm kill Ar string
+Disconnect a subscribed client from thingsd by client name.
+.It Cm show Ar string
+View string version of a thing's packets by its name.
+A thing could be sending binary data!
+Use at your own risk.
 .El
 .Sh FILES
 .Bl -tag -width "/var/run/thingsd.sockXX" -compact

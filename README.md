@@ -68,11 +68,6 @@ See the examples for more testing options.
 
 Further examples can be found in the src/examples directory above.
 
-Todo
-----
-
-* Finish thingsctl functions
-
 Author
 ------
 
