@@ -187,11 +187,24 @@ main(int argc, char *argv[])
 void
 thgsd_shutdown()
 {
+	pid_t		 pid;
+	int		 status;
+
 	/* close pipe */
 	msgbuf_write(&iev_thgs->ibuf.w);
 	msgbuf_clear(&iev_thgs->ibuf.w);
 	close(iev_thgs->ibuf.fd);
 	free(iev_thgs);
+	log_debug("waiting for children to terminate");
+	do {
+		pid = wait(&status);
+		if (pid == -1) {
+			if (errno != EINTR && errno != ECHILD)
+				fatal("wait");
+		} else if (WIFSIGNALED(status))
+			log_warnx("%s terminated; signal %d", "things",
+			    WTERMSIG(status));
+	} while (pid != -1 || (pid == -1 && errno == EINTR));
 	log_info("%s terminated", getprogname());
 	exit(0);
 }
