@@ -334,7 +334,7 @@ sock_rd(struct bufferevent *bev, void *arg)
 	struct thg		*thg = NULL, *tthg;
 	struct clt		*clt;
 	size_t			 len;
-	int			 fd = bev->ev_read.ev_fd, pchk;
+	int			 fd = bev->ev_read.ev_fd, pchk, snm;
 	size_t			 n;
 	char			*pkt;
 
@@ -353,9 +353,11 @@ sock_rd(struct bufferevent *bev, void *arg)
 	if (pchk == -1 && errno > 1) {
 		ctl_pkt->exists = false;
 		ctl_pkt->cpid = -1;
+		ctl_pkt->name = NULL;
 	}
-	if (ctl_pkt->exists && strncmp(thg->name, ctl_pkt->name,
-	    sizeof(*thg->name)) == 0) {
+	if (ctl_pkt->name != NULL)
+		snm = strcmp(thg->name, ctl_pkt->name);
+	if (ctl_pkt->exists && snm == 0) {
 		evbuffer_remove(thg->evb, pkt, len);
 		thgs_imsg_compose_main(IMSG_SHOW_PKTS, ctl_pkt->pid,
 		    pkt, len);
