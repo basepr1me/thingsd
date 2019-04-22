@@ -6,8 +6,6 @@ INC_C_DIR=	/usr/local
 BINDIR?=	${INC_C_DIR}/sbin
 MANDIR?=	${INC_C_DIR}/man/man
 
-DEBUG=		-g -DDEBUG=3 -O0
-
 LDADD=		-lutil
 CFLAGS+=	-Wall -I${.CURDIR}
 CFLAGS+=	-Wstrict-prototypes -Wmissing-prototypes

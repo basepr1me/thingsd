@@ -14,7 +14,6 @@ MANDIR?=	${INC_C_DIR}/man/man
 
 LDADD=		-levent -ltls -lssl -lcrypto -lutil -pthread
 DPADD=		${LIBEVENT} ${LIBTLS} ${LIBSSL} ${LIBCRYPTO} ${LIBUTIL}
-DEBUG=		-g -DDEBUG=3 -O0
 
 CFLAGS+=	-Wall -I${.CURDIR}
 CFLAGS+=	-Wstrict-prototypes -Wmissing-prototypes
