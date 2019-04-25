@@ -124,7 +124,6 @@ thgs_main(int debug, int verbose, char *thgs_sock)
 		event_base_loopexit(pthgsd->thgs_eb, &eb_timeout);
 		event_base_dispatch(pthgsd->thgs_eb);
 	}
-
 	thgs_shutdown(pdthgs);
 }
 
@@ -161,8 +160,6 @@ thgs_dispatch_main(int fd, short event, void *bula)
 
 		switch (imsg.hdr.type) {
 		case IMSG_SHOW_PKTS:
-			if (ctl_pkt->exists)
-				return;
 			TAILQ_FOREACH(thg, &pthgsd->thgs, entry) {
 				if (strncmp(thg->name, imsg.data,
 				    sizeof(imsg.data)) == 0) {
@@ -484,15 +481,9 @@ compose_socks(struct sock *psock)
 void
 send_ctl_pkt(char *name, char *pkt, int len)
 {
-	int		 pchk, snm;
+	int			 snm;
 
 	/* send pkt to control socket */
-	pchk = kill(ctl_pkt->cpid, 0);
-	if (pchk == -1 && errno > 1) {
-		ctl_pkt->exists = false;
-		ctl_pkt->cpid = -1;
-		ctl_pkt->name = NULL;
-	}
 	if (ctl_pkt->name != NULL)
 		snm = strcmp(name, ctl_pkt->name);
 	if (ctl_pkt->exists && snm == 0) {

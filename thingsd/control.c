@@ -36,6 +36,8 @@
 struct ctl_conn		*control_connbyfd(int);
 struct ctl_conn		*control_connbypid(pid_t);
 
+int			 show_ctl, show_fd;
+
 void			 control_close(int);
 
 int
@@ -179,6 +181,8 @@ control_close(int fd)
 		return;
 	}
 
+	if (fd == show_fd)
+		show_ctl = 0;
 	msgbuf_clear(&c->iev.ibuf.w);
 	TAILQ_REMOVE(&ctl_conns, c, entry);
 
@@ -236,6 +240,10 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		}
 		if (n == 0)
 			break;
+		if (show_ctl) {
+			control_close(fd);
+			return;
+		}
 
 		switch (imsg.hdr.type) {
 		case IMSG_THGS_LOG_VERBOSE:
@@ -253,6 +261,8 @@ control_dispatch_imsg(int fd, short event, void *bula)
 
 		switch (imsg.hdr.type) {
 		case IMSG_SHOW_PKTS:
+			show_ctl = 1;
+			show_fd = fd;
 			main_imsg_compose_thgs(imsg.hdr.type, imsg.hdr.pid,
 			    imsg.data, IMSG_DATA_SIZE(imsg));
 			break;
