@@ -174,7 +174,6 @@ control_close(int fd)
 {
 	struct ctl_conn		*c;
 
-	/* main_imsg_compose_thgs(IMSG_CTL_CONN, 0, false, 1); */
 	if ((c = control_connbyfd(fd)) == NULL) {
 		log_warnx("%s: fd %d: not found", __func__, fd);
 		return;
