@@ -296,12 +296,13 @@ void				 imsg_event_add(struct imsgev *);
 int				 imsg_compose_event(struct imsgev *, uint16_t,
 				    uint32_t, pid_t, int, void *, uint16_t);
 
-/* thgs.c */
+/* things.c */
 void             		 thgs_main(int, int, char*);
 void				 add_reconn(struct thg *);
 struct dthg			*new_dthg(struct thg *);
 int			 	 thgs_imsg_compose_main(int, pid_t, void *,
 				    uint16_t);
+void				 send_ctl_pkt(char *, char *, int);
 
 /* parse.y */
 struct thg			*new_thg(char *);

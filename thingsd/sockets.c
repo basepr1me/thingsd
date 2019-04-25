@@ -334,47 +334,32 @@ sock_rd(struct bufferevent *bev, void *arg)
 	struct thg		*thg = NULL, *tthg;
 	struct clt		*clt;
 	size_t			 len;
-	int			 fd = bev->ev_read.ev_fd, pchk, snm;
+	int			 fd = bev->ev_read.ev_fd;
 	size_t			 n;
 	char			*pkt;
 
 	TAILQ_FOREACH(tthg, &pthgsd->thgs, entry) {
 		if (tthg->fd == fd) {
 			thg = tthg;
-			break;
+			thg->evb = EVBUFFER_INPUT(bev);
+			len = EVBUFFER_LENGTH(thg->evb);
+
+			if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
+				return;
+
+			evbuffer_remove(thg->evb, pkt, len);
+			TAILQ_FOREACH(clt, &pthgsd->clts, entry) {
+				for (n = 0; n < clt->le; n++) {
+					if (strcmp(clt->sub_names[n], thg->name)
+					    == 0)
+						bufferevent_write(clt->bev, pkt,
+						    len);
+				}
+			}
+			send_ctl_pkt(thg->name, pkt, len);
+			free(pkt);
 		}
 	}
-	thg->evb = EVBUFFER_INPUT(bev);
-	len = EVBUFFER_LENGTH(thg->evb);
-	if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
-		return;
-	/* send pkt to control socket */
-	pchk = kill(ctl_pkt->cpid, 0);
-	if (pchk == -1 && errno > 1) {
-		ctl_pkt->exists = false;
-		ctl_pkt->cpid = -1;
-		ctl_pkt->name = NULL;
-	}
-	if (ctl_pkt->name != NULL)
-		snm = strcmp(thg->name, ctl_pkt->name);
-	if (ctl_pkt->exists && snm == 0) {
-		evbuffer_remove(thg->evb, pkt, len);
-		thgs_imsg_compose_main(IMSG_SHOW_PKTS, ctl_pkt->pid,
-		    pkt, len);
-	}
-	if (thg->clt_cnt == 0) {
-		evbuffer_drain(thg->evb, len);
-		return;
-	} else if (ctl_pkt->exists == false)
-		evbuffer_remove(thg->evb, pkt, len);
-	/*  write to clients */
-	TAILQ_FOREACH(clt, &pthgsd->clts, entry) {
-		for (n = 0; n < clt->le; n++) {
-			if (strcmp(clt->sub_names[n], thg->name) == 0)
-				bufferevent_write(clt->bev, pkt, len);
-		}
-	}
-	free(pkt);
 }
 
 void

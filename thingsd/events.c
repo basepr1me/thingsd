@@ -52,5 +52,6 @@ udp_evt(int fd, short event, void *arg)
 					bufferevent_write(clt->bev, pkt, len);
 			}
 		}
+		send_ctl_pkt(thg->name, pkt, len);
 	}
 }

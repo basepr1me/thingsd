@@ -478,3 +478,23 @@ compose_socks(struct sock *psock)
 	comp_sock->tls = psock->tls;
 	return(comp_sock);
 };
+
+void
+send_ctl_pkt(char *name, char *pkt, int len)
+{
+	int		 pchk, snm;
+
+	/* send pkt to control socket */
+	pchk = kill(ctl_pkt->cpid, 0);
+	if (pchk == -1 && errno > 1) {
+		ctl_pkt->exists = false;
+		ctl_pkt->cpid = -1;
+		ctl_pkt->name = NULL;
+	}
+	if (ctl_pkt->name != NULL)
+		snm = strcmp(name, ctl_pkt->name);
+	if (ctl_pkt->exists && snm == 0) {
+		thgs_imsg_compose_main(IMSG_SHOW_PKTS, ctl_pkt->pid,
+		    pkt, len);
+	}
+}
