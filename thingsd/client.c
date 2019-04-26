@@ -153,8 +153,7 @@ clt_del(struct thgsd *pthgsd, struct clt *pclt)
 	size_t			 n;
 
 	TAILQ_FOREACH_SAFE(clt, &pthgsd->clts, entry, tclt) {
-		if (clt == pclt) {
-			close(clt->fd);
+		if (clt->fd == pclt->fd) {
 			if (clt->tls)
 				tls_free(clt->tls_ctx);
 			free(clt->ev);
@@ -169,13 +168,14 @@ clt_del(struct thgsd *pthgsd, struct clt *pclt)
 				log_debug("%s: client disconnected", __func__);
 			else
 				log_info("client disconnected: %s", clt->name);
-			TAILQ_REMOVE(&pthgsd->clts, clt, entry);
 			if (clt->bev != NULL)
 				bufferevent_free(clt->bev);
-			free(clt);
+			close(clt->fd);
+			TAILQ_REMOVE(&pthgsd->clts, clt, entry);
 			break;
 		}
 	}
+	free(clt);
 }
 
 void
@@ -395,9 +395,10 @@ clt_do_chk(struct thgsd *pthgsd)
 
 	TAILQ_FOREACH(clt, &pthgsd->clts, entry) {
 		if (clt->subscribed == false) {
-			if ((ctime - clt->join_time) >= CLT_SUB_TIME)
+			if ((ctime - clt->join_time) >= CLT_SUB_TIME) {
 				clt_del(pthgsd, clt);
-			break;
+				break;
+			}
 		}
 	}
 }
