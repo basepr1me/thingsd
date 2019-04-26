@@ -102,13 +102,11 @@ clt_conn(int fd, short event, void *arg)
 	return;
  err:
 	log_debug("%s: client error", __func__);
-	if (clt_fd != -1) {
+	if (clt_fd != -1)
 		close(clt_fd);
-		if (sock->tls) {
-			tls_free(clt->tls_ctx);
-			free(clt->ev);
-		}
-	}
+	if (sock->tls)
+		tls_free(clt->tls_ctx);
+	free(clt->ev);
 	free(clt);
 }
 
@@ -139,13 +137,11 @@ clt_add(struct thgsd *pthgsd, struct clt *pclt)
 	return;
  err:
 	log_debug("%s: client error", __func__);
-	if (clt->fd != -1) {
+	if (clt->fd != -1)
 		close(clt->fd);
-		if (sock->tls) {
-			tls_free(clt->tls_ctx);
-			free(clt->ev);
-		}
-	}
+	if (sock->tls)
+		tls_free(clt->tls_ctx);
+	free(clt->ev);
 	free(clt);
 }
 
@@ -158,11 +154,10 @@ clt_del(struct thgsd *pthgsd, struct clt *pclt)
 
 	TAILQ_FOREACH_SAFE(clt, &pthgsd->clts, entry, tclt) {
 		if (clt == pclt) {
-			if (clt->tls) {
-				tls_free(clt->tls_ctx);
-				free(clt->ev);
-			}
 			close(clt->fd);
+			if (clt->tls)
+				tls_free(clt->tls_ctx);
+			free(clt->ev);
 			for (n = 0; n < clt->le; n++)
 				TAILQ_FOREACH(thg, &pthgsd->thgs, entry)
 					if (strcmp(clt->sub_names[n],
