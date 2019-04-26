@@ -123,11 +123,11 @@ main(int argc, char *argv[])
 	switch (res->action) {
 	case SHOW_PKTS:
 		imsg_compose(ibuf, IMSG_SHOW_PKTS, 0, 0, -1,
-		    res->thg_name, sizeof(res->thg_name));
+		    res->thg_name, strlen(res->thg_name));
 		break;
 	case KILL_CLT:
 		imsg_compose(ibuf, IMSG_KILL_CLT, 0, 0, -1,
-		    res->clt_name, sizeof(res->clt_name));
+		    res->clt_name, strlen(res->clt_name));
 		printf("kill request for client \"%s\" sent\n", res->clt_name);
 		done = 1;
 		break;
