@@ -41,7 +41,7 @@ create_socks(struct thgsd *pthgsd, bool reconn)
 	struct thg		*thg;
 	struct sock		*sock = NULL, *tsock, *conn_sock = NULL;
 	char			*iface = NULL;
-	int			 csock = -1, conn_csock = -1;
+	int			 csock = 0, conn_csock = 0;
 	bool			 fail = false;
 	evbuffercb		 sockrd = sock_rd;
 	evbuffercb		 sockwr = sock_wr;
