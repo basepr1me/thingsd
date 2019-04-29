@@ -162,7 +162,7 @@ thgs_dispatch_main(int fd, short event, void *bula)
 		case IMSG_SHOW_PKTS:
 			TAILQ_FOREACH(thg, &pthgsd->thgs, entry) {
 				if (strncmp(thg->name, imsg.data,
-				    sizeof(imsg.data)) == 0) {
+				    strlen(imsg.data)) == 0) {
 					if ((ctl_pkt->name =
 					    strdup(imsg.data)) == NULL)
 						break;
@@ -182,7 +182,7 @@ thgs_dispatch_main(int fd, short event, void *bula)
 					break;
 				if (strncmp(clt->name, imsg.data, BUFF) == 0) {
 					log_debug("Control killed client: %s",
-					    imsg.data);
+					    (char *)imsg.data);
 					clt_del(pthgsd, clt);
 					break;
 				}

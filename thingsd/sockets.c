@@ -39,9 +39,9 @@ void
 create_socks(struct thgsd *pthgsd, bool reconn)
 {
 	struct thg		*thg;
-	struct sock		*sock, *tsock, *conn_sock = NULL;
+	struct sock		*sock = NULL, *tsock, *conn_sock = NULL;
 	char			*iface = NULL;
-	int			 csock, conn_csock;
+	int			 csock = -1, conn_csock = -1;
 	bool			 fail = false;
 	evbuffercb		 sockrd = sock_rd;
 	evbuffercb		 sockwr = sock_wr;
@@ -291,7 +291,7 @@ get_ifaddrs(char *name)
 			    NI_NUMERICHOST))
 				log_warnx("getnameinfo error");
 			if ((strcmp(name, ifap->ifa_name) == 0) &&
-			    addr != '\0') {
+			    *addr != '\0') {
 				freeifaddrs(ifap);
 				return addr;
 			}
