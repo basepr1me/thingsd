@@ -481,7 +481,7 @@ compose_socks(struct sock *psock)
 void
 send_ctl_pkt(char *name, char *pkt, int len)
 {
-	int			 snm;
+	int			 snm = -1;
 
 	/* send pkt to control socket */
 	if (ctl_pkt->name != NULL)
