@@ -182,7 +182,7 @@ thgs_dispatch_main(int fd, short event, void *bula)
 					break;
 				if (strncmp(clt->name, imsg.data, BUFF) == 0) {
 					log_debug("Control killed client: %s",
-					    imsg.data);
+					    (char *)imsg.data);
 					clt_del(pthgsd, clt);
 					break;
 				}
