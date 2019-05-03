@@ -67,7 +67,7 @@ main(int argc, char *argv[])
 	int			 n, verbose = 0;
 	int			 ch;
 	int			 type;
-	char			*sockname;
+	char			*sockname, *ctl_pkt;
 
 	sockname = THINGSD_SOCK;
 	while ((ch = getopt(argc, argv, "s:")) != -1) {
@@ -183,7 +183,16 @@ main(int argc, char *argv[])
 					done = 1;
 					break;
 				}
-				printf("%s\n", (char *)imsg.data);
+				if ((ctl_pkt = calloc(IMSG_DATA_SIZE(imsg),
+				    sizeof(*ctl_pkt))) == NULL)
+					errx(1, "calloc ctl_pkt");
+				if ((ctl_pkt = strndup(imsg.data,
+				    IMSG_DATA_SIZE(imsg))) == NULL) {
+					free(ctl_pkt);
+					break;
+				}
+				printf("%s\n", ctl_pkt);
+				free(ctl_pkt);
 				break;
 			case LIST_CLTS:
 			case LIST_THGS:
