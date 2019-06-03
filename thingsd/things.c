@@ -199,6 +199,10 @@ thgs_dispatch_main(int fd, short event, void *bula)
 			memcpy(&verbose, imsg.data, sizeof(verbose));
 			log_setverbose(verbose);
 			break;
+		case IMSG_CTL_END:
+			ctl_pkt->exists = false;
+			ctl_pkt->cpid = -1;
+			break;
 		default:
 			log_debug("%s: error handling imsg %d", __func__,
 			    imsg.hdr.type);
@@ -484,10 +488,10 @@ send_ctl_pkt(char *name, char *pkt, int len)
 	int			 snm = -1;
 
 	/* send pkt to control socket */
-	if (ctl_pkt->name != NULL)
-		snm = strcmp(name, ctl_pkt->name);
-	if (ctl_pkt->exists && snm == 0) {
-		thgs_imsg_compose_main(IMSG_SHOW_PKTS, ctl_pkt->pid,
-		    pkt, len);
+	if (ctl_pkt->exists) {
+		if (ctl_pkt->name != NULL)
+			if ((snm = strcmp(name, ctl_pkt->name)) == 0)
+				thgs_imsg_compose_main(IMSG_SHOW_PKTS,
+				    ctl_pkt->pid, pkt, len);
 	}
 }
