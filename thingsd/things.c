@@ -164,8 +164,9 @@ thgs_dispatch_main(int fd, short event, void *bula)
 				if (strncmp(thg->name, imsg.data,
 				    strlen(imsg.data)) == 0) {
 					if ((ctl_pkt->name =
-					    strdup(imsg.data)) == NULL)
-						break;
+					    strndup(imsg.data,
+					    strlen(imsg.data))) == NULL)
+						continue;
 					ctl_pkt->exists = true;
 					ctl_pkt->cpid = imsg.hdr.pid;
 					tchk = false;
@@ -200,8 +201,11 @@ thgs_dispatch_main(int fd, short event, void *bula)
 			log_setverbose(verbose);
 			break;
 		case IMSG_CTL_END:
-			ctl_pkt->exists = false;
-			ctl_pkt->cpid = -1;
+			if (ctl_pkt->exists) {
+				free(ctl_pkt->name);
+				ctl_pkt->exists = false;
+				ctl_pkt->cpid = -1;
+			}
 			break;
 		default:
 			log_debug("%s: error handling imsg %d", __func__,
