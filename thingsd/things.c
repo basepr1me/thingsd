@@ -162,14 +162,16 @@ thgs_dispatch_main(int fd, short event, void *bula)
 		case IMSG_SHOW_PKTS:
 			TAILQ_FOREACH(thg, &pthgsd->thgs, entry) {
 				if (strncmp(thg->name, imsg.data,
-				    strlen(imsg.data)) == 0) {
+				    IMSG_DATA_SIZE(imsg)) == 0) {
 					if ((ctl_pkt->name =
-					    strndup(imsg.data,
-					    strlen(imsg.data))) == NULL)
+					    strndup(thg->name,
+					    strlen(thg->name))) == NULL)
 						continue;
-					ctl_pkt->exists = true;
-					ctl_pkt->cpid = imsg.hdr.pid;
 					tchk = false;
+					ctl_pkt->cpid = imsg.hdr.pid;
+					ctl_pkt->exists = true;
+					log_debug("ctl request packets: %s",
+					    thg->name);
 					break;
 				}
 			}
@@ -202,9 +204,9 @@ thgs_dispatch_main(int fd, short event, void *bula)
 			break;
 		case IMSG_CTL_END:
 			if (ctl_pkt->exists) {
-				free(ctl_pkt->name);
 				ctl_pkt->exists = false;
 				ctl_pkt->cpid = -1;
+				free(ctl_pkt->name);
 			}
 			break;
 		default:
