@@ -37,6 +37,7 @@
 #define MAX_RTRY		 600
 #define DEFAULT_BAUD		 9600
 #define CLT_SUB_TIME		 5
+#define CLT_SUB_CHK		 1
 #define BUFF			 1024
 #define DTHG_CHK		 2
 #define EB_TIMEOUT		 10

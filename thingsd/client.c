@@ -133,7 +133,6 @@ clt_add(struct thgsd *pthgsd, struct clt *pclt)
 	}
 	bufferevent_setwatermark(clt->bev, EV_READ, 0, BUFF);
 	bufferevent_enable(clt->bev, EV_READ);
-	start_clt_chk(pthgsd);
 	return;
  err:
 	log_debug("%s: client error", __func__);
@@ -156,7 +155,6 @@ clt_del(struct thgsd *pthgsd, struct clt *pclt)
 		if (clt->fd == pclt->fd) {
 			if (clt->tls)
 				tls_free(clt->tls_ctx);
-			free(clt->ev);
 			for (n = 0; n < clt->le; n++)
 				TAILQ_FOREACH(thg, &pthgsd->thgs, entry)
 					if (strcmp(clt->sub_names[n],
@@ -172,10 +170,13 @@ clt_del(struct thgsd *pthgsd, struct clt *pclt)
 				bufferevent_free(clt->bev);
 			close(clt->fd);
 			TAILQ_REMOVE(&pthgsd->clts, clt, entry);
+			free(clt->ev);
+			free(clt->sub_names);
+			free(clt->name);
+			free(clt);
 			break;
 		}
 	}
-	free(clt);
 }
 
 void
@@ -410,9 +411,11 @@ void
 	void			(*tfptr)(struct thgsd *);
 
 	tfptr = pthgsd->clt_fptr;
-	sleep(CLT_SUB_TIME);
-	(void)(*tfptr)(pthgsd);
-	return NULL;
+	while(1) {
+		sleep(CLT_SUB_CHK);
+		(void)(*tfptr)(pthgsd);
+	}
+	pthread_exit(NULL);
 }
 
 void

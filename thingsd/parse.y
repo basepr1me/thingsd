@@ -922,6 +922,7 @@ parse_buf(struct clt *pclt, u_char *pkt, int len)
 	yyparse();
 	errors = file->errors;
 	popbuff();
+	free(file);
 	return (errors ? -1 : 0);
 }
 

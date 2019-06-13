@@ -115,6 +115,7 @@ thgs_main(int debug, int verbose, char *thgs_sock)
 	eb_timeout.tv_sec = EB_TIMEOUT;
 	eb_timeout.tv_usec = 0;
 
+	start_clt_chk(pthgsd);
 	while (pdthgs->run) {
 		if (pthgsd->exists) {
 			do_reconn();
