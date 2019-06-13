@@ -198,6 +198,8 @@ subthgs		: THING '{' STRING ',' STRING '}' optcomma {
 						continue;
 					}
 			}
+			free($3);
+			free($5);
 		}
 		;
 bindopts1	: BIND INTERFACE STRING {
