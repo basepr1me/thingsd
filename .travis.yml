@@ -1,1 +1,7 @@
 lanugage: c
+
+os: openbsd
+
+compiler: clang
+
+script: make
