@@ -21,6 +21,8 @@ CFLAGS+=	-Wsign-compare -pthread
 
 CLEANFILES+=	y.tab.h
 
+DEBUG=		-g -O2
+
 MAN=		thingsd.8 thingsd.conf.5
 
 .include <bsd.prog.mk>

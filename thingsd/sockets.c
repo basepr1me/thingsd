@@ -266,13 +266,15 @@ open_clt_sock(char *ip_addr, int cport)
 char *
 get_ifaddrs(char *name)
 {
-	struct ifaddrs		*ifap;
-	struct sockaddr		*sa;
+	struct ifaddrs		*ifap = 0, *ifa;
+	struct sockaddr		*sa = NULL;
 	char			*addr = NULL;
+	char			 hbuf[NI_MAXHOST];
+	int			 count = 0;
 
 	if (getifaddrs(&ifap) == -1)
 		fatalx("getifaddrs error");
-	while (ifap) {
+	for (count = 0, ifa = ifap; ifa; ifa = ifa->ifa_next) {
 		if ((ifap->ifa_addr) &&
 		    ((ifap->ifa_addr->sa_family == AF_INET) ||
 		    (ifap->ifa_addr->sa_family == AF_INET6))) {
@@ -286,18 +288,20 @@ get_ifaddrs(char *name)
 				    (struct sockaddr_in6*) ifap->ifa_addr;
 				sa = (struct sockaddr *) in6;
 			}
-			if (getnameinfo(sa, sa->sa_len, addr,
-			    sizeof(char) * NI_MAXHOST, NULL, 0, NI_NAMEREQD |
+			if (getnameinfo(sa, sa->sa_len, hbuf,
+			    sizeof(hbuf), NULL, 0, NI_NAMEREQD |
 			    NI_NUMERICHOST))
 				log_warnx("getnameinfo error");
-			if ((strcmp(name, ifap->ifa_name) == 0) &&
-			    *addr != '\0') {
+			addr = strdup(hbuf);
+			if (addr == NULL)
+				goto err;
+			if (strcmp(name, ifap->ifa_name) == 0) {
 				freeifaddrs(ifap);
 				return addr;
 			}
 		}
-		ifap = ifap->ifa_next;
 	}
+err:
 	freeifaddrs(ifap);
 	return NULL;
 }

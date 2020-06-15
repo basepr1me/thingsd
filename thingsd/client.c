@@ -29,8 +29,8 @@
 
 #include "thingsd.h"
 
-extern void		 bufferevent_read_pressure_cb(struct evbuffer *, size_t,
-			    size_t, void *);
+extern void bufferevent_read_pressure_cb(struct evbuffer *, size_t,
+    size_t, void *);
 
 void
 clt_conn(int fd, short event, void *arg)
