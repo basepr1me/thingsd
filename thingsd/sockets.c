@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019-2020 Tracey Emery <tracey@traceyemery.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -91,7 +91,7 @@ create_socks(struct thgsd *pthgsd, bool reconn)
 				thg->exists = true;
 			thg->fd = conn_sock->fd;
 		}
- recreate:
+recreate:
 		if (thg->ipaddr != NULL) {
 			thg->type = TCP;
 			if (thg->persist == 1) {

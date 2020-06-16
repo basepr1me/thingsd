@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2019 - 2020 Tracey Emery <tracey@traceyemery.net>
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -69,7 +70,9 @@ main(int argc, char *argv[])
 	int			 type;
 	char			*sockname, *ctl_pkt;
 
-	sockname = THINGSD_SOCK;
+	sockname = strdup(THINGSD_SOCK);
+	if (sockname == NULL)
+		err(1, "strdup");
 	while ((ch = getopt(argc, argv, "s:")) != -1) {
 		switch (ch) {
 		case 's':
@@ -209,6 +212,7 @@ main(int argc, char *argv[])
 	}
 	close(ctl_sock);
 	free(ibuf);
+	free(sockname);
 
 	return (0);
 }
