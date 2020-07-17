@@ -1,2 +1,0 @@
-#thingsd
-Examples of usage.
