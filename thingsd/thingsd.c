@@ -315,8 +315,6 @@ main(int argc, char **argv)
 		if (env->exists) {
 			do_reconn();
 		}
-		if (getppid() == 1)
-			break;
 		event_base_loopexit(env->things_eb, &eb_timeout);
 		event_base_dispatch(env->things_eb);
 	}
