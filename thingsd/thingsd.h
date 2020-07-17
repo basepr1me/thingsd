@@ -269,6 +269,7 @@ void	 things_shutdown(void);
 void	 add_reconn(struct thing *);
 void	 do_reconn(void);
 void	 things_sighdlr(int, short, void *);
+void	 things_show_info(struct privsep *, struct imsg *);
 
 /* control.c */
 int	 config_init(struct thingsd *);

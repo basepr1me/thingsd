@@ -131,11 +131,19 @@ main(int argc, char *argv[])
 		imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0,
 		    0, -1, NULL, 0);
 		break;
-	case SHOW_THING:
-		break;
-	case RESET:
-		imsg_compose(ibuf, IMSG_CTL_RESET, 0, 0, -1, &v, sizeof(v));
-		printf("reset request sent.\n");
+	case RELOAD:
+		printf("\nAll things and sockets will be reset.\n");
+		printf("This can have unintended consequences!\n");
+		printf("For example, all clients will have to reconnect.\n\n");
+		printf("Are you sure you want to reload the config? (y|n) ");
+		ch = getchar();
+		if (ch == 'y' || ch == 'Y') {
+			imsg_compose(ibuf, IMSG_CTL_RESET, 0, 0, -1, &v,
+			    sizeof(v));
+			printf("Reload request sent\n");
+		} else
+			printf("Reload request ignored\n");
+		printf("\n");
 		done = 1;
 		break;
 	default:
@@ -188,7 +196,7 @@ show_parent_msg(struct imsg *imsg)
 	switch (imsg->hdr.type) {
 	case IMSG_GET_INFO_PARENT_DATA:
 		npi = imsg->data;
-		printf("parent says: Logging level is ");
+		printf("Parent says: Logging level is ");
 		if (npi->verbose == 2)
 			printf("debug");
 		else if (npi->verbose == 1)
@@ -208,18 +216,23 @@ show_parent_msg(struct imsg *imsg)
 }
 
 int
-list_things_msg(struct imsg *imsg)
+show_control_msg(struct imsg *imsg)
 {
-	struct thing *nei;
+	struct thingsd_control_info *nci;
 
 	switch (imsg->hdr.type) {
-	case IMSG_GET_INFO_THINGS_DATA:
-		nei = (struct thing *) imsg->data;
-		printf("Thing: '%s'\n", nei->name);
-		printf("\tPassword: %s\n", nei->password);
-		printf("\n");
+	case IMSG_GET_INFO_CONTROL_DATA:
+		nci = imsg->data;
+		printf("Control says: Logging level is ");
+		if (nci->verbose == 2)
+			printf("debug");
+		else if (nci->verbose == 1)
+			printf("verbose");
+		else
+			printf("brief");
+		printf(" (%d)\n", nci->verbose);
 		break;
-	case IMSG_GET_INFO_THINGS_END_DATA:
+	case IMSG_GET_INFO_CONTROL_END_DATA:
 	case IMSG_CTL_END:
 		return (1);
 	default:
@@ -230,23 +243,58 @@ list_things_msg(struct imsg *imsg)
 }
 
 int
-show_control_msg(struct imsg *imsg)
+list_things_msg(struct imsg *imsg)
 {
-	struct thingsd_control_info *nci;
+	struct thing *nti;
 
 	switch (imsg->hdr.type) {
-	case IMSG_GET_INFO_CONTROL_DATA:
-		nci = imsg->data;
-		printf("parent says: Logging level is ");
-		if (nci->verbose == 2)
-			printf("debug");
-		else if (nci->verbose == 1)
-			printf("verbose");
+	case IMSG_GET_INFO_THINGS_DATA:
+		nti = (struct thing *) imsg->data;
+
+
+		printf("\nThing Name:\t\t\t%s\n", nti->name);
+		switch(nti->type) {
+		case TCP:
+			printf("\tIP Addr:\t\t%s\n", nti->ipaddr);
+			printf("\tConnect Port:\t\t%d\n", nti->conn_port);
+			printf("\tPersists:\t\t%d\n", nti->persist);
+			break;
+		case UDP:
+			printf("\tUDP Listener:\t\t%s\n", nti->udp);
+			printf("\tConnect Port:\t\t%d\n", nti->rcv_port);
+			break;
+		case DEV:
+			printf("\tDevice:\t\t\t%s\n", nti->location);
+			printf("\tBaud:\t\t\t%d\n", nti->baud);
+			printf("\tData:\t\t\t%d\n", nti->data_bits);
+			printf("\tStop:\t\t\t%d\n", nti->stop_bits);
+			printf("\tHardware:\t\t%d\n", nti->hw_ctl);
+			printf("\tSoftware:\t\t%d\n", nti->sw_ctl);
+			printf("\tParity:\t\t\t%s\n", nti->parity);
+			break;
+	}
+		if (strncmp(nti->iface, "", PKT_BUFF) == 0)
+			printf("\tBind Interface:\t\tall\n");
 		else
-			printf("brief");
-		printf(" (%d)\n", nci->verbose);
+			printf("\tBind Interface:\t\t%s\n", nti->iface);
+		printf("\tListen Port:\t\t%d\n", nti->port);
+		if (nti->max_clients == 0)
+			printf("\tMax Clients:\t\tunlimited\n");
+		else
+			printf("\tMax Clients:\t\t%d\n", nti->max_clients);
+		printf("\tPassword:\t\t%s\n", nti->password);
+		printf("\tClient Count:\t\t%zu\n", nti->client_cnt);
+		if (nti->tls == false)
+			break;
+		printf("\tTLS:\t\t\t%d\n", nti->tls);
+		printf("\tCert:\t\t\t%s\n", nti->tls_cert_file);
+		printf("\tKey:\t\t\t%s\n", nti->tls_key_file);
+		printf("\tCA:\t\t\t%s\n", nti->tls_ca_file);
+		printf("\tCRL:\t\t\t%s\n", nti->tls_crl_file);
+		printf("\tOCSP:\t\t\t%s\n", nti->tls_ocsp_staple_file);
+
 		break;
-	case IMSG_GET_INFO_CONTROL_END_DATA:
+	case IMSG_GET_INFO_THINGS_END_DATA:
 	case IMSG_CTL_END:
 		return (1);
 	default:

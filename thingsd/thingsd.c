@@ -79,7 +79,7 @@ thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 	switch (imsg->hdr.type) {
 	case IMSG_GET_INFO_THINGS_REQUEST:
 	case IMSG_GET_INFO_THINGS_REQUEST_ROOT:
-		proc_forward_imsg(ps, imsg, PROC_THINGS, -1);
+		things_show_info(ps, imsg);
 		break;
 	case IMSG_GET_INFO_PARENT_REQUEST:
 		thingsd_show_info(ps, imsg);

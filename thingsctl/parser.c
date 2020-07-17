@@ -55,7 +55,7 @@ static const struct token t_main[];
 static const struct token t_show[];
 
 static const struct token t_main[] = {
-	{KEYWORD,	"reset",	RESET,		NULL},
+	{KEYWORD,	"reload",	RELOAD,		NULL},
 	{KEYWORD,	"list",		LIST,		t_list},
 	{KEYWORD,	"show",		SHOW,		t_show},
 	{KEYWORD,	"log",		NONE,		t_log},

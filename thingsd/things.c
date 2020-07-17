@@ -47,7 +47,6 @@
 
 int things_dispatch_parent(int, struct privsep_proc *, struct imsg *);
 void things_run(struct privsep *, struct privsep_proc *, void *);
-void things_show_info(struct privsep *, struct imsg *);
 
 struct thing compose_thing(struct thing *, enum imsg_type);
 
@@ -167,11 +166,6 @@ things_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 
 		TAILQ_INSERT_TAIL(thingsd_env->things, thing, entry);
 
-		break;
-	case IMSG_GET_INFO_THINGS_REQUEST:
-	case IMSG_GET_INFO_THINGS_REQUEST_ROOT:
-		things_show_info(ps, imsg);
-		cmd = IMSG_GET_INFO_THINGS_END_DATA;
 		break;
 	case IMSG_CTL_RESET:
 		IMSG_SIZE_CHECK(imsg, &mode);
@@ -308,7 +302,7 @@ things_show_info(struct privsep *ps, struct imsg *imsg)
 			    thing->name, sizeof(filter)) == 0) {
 				nti = compose_thing(thing, imsg->hdr.type);
 
-				if (proc_compose_imsg(ps, PROC_PARENT, -1,
+				if (proc_compose_imsg(ps, PROC_CONTROL, -1,
 				    IMSG_GET_INFO_THINGS_DATA,
 				    imsg->hdr.peerid, -1, &nti,
 				    sizeof(nti)) == -1)
@@ -317,7 +311,7 @@ things_show_info(struct privsep *ps, struct imsg *imsg)
 			}
 		}
 
-		if (proc_compose_imsg(ps, PROC_PARENT, -1,
+		if (proc_compose_imsg(ps, PROC_CONTROL, -1,
 		    IMSG_GET_INFO_THINGS_END_DATA, imsg->hdr.peerid,
 			    -1, &nti, sizeof(nti)) == -1)
 				return;
