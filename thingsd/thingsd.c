@@ -72,12 +72,33 @@ static struct passwd proc_privpw;
 int
 thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
-	struct privsep			*ps = p->p_ps;
-	int				 res = 0, cmd = 0, verbose;
-	unsigned int			 v = 0;
+	struct privsep	*ps = p->p_ps;
+	int		 res = 0, cmd = 0, verbose;
+	unsigned int	 v = 0;
+	char		 client_name[THINGSD_MAXTHINGNAME];
+	struct client	*client;
 
 	switch (imsg->hdr.type) {
-	case IMSG_GET_INFO_THINGS_REQUEST:
+	case IMSG_KILL_CLIENT:
+		IMSG_SIZE_CHECK(imsg, &v);
+		if (imsg->data == NULL)
+			break;
+		memcpy(client_name, imsg->data, sizeof(client_name));
+		TAILQ_FOREACH(client, thingsd_env->clients, entry) {
+			if (strcmp(client->name, client_name) == 0) {
+				log_debug("Control killed client: %s",
+				    client_name);
+				client_del(thingsd_env, client);
+				break;
+			}
+		}
+		break;
+	case IMSG_GET_INFO_CLIENTS_REQUEST:
+		clients_show_info(ps, imsg);
+		break;
+	case IMSG_GET_INFO_SOCKETS_REQUEST:
+		sockets_show_info(ps, imsg);
+		break;
 	case IMSG_GET_INFO_THINGS_REQUEST_ROOT:
 		things_show_info(ps, imsg);
 		break;
@@ -120,6 +141,18 @@ thingsd_dispatch_things(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct privsep		*ps = p->p_ps;
 
 	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_CLIENTS_DATA:
+		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
+		break;
+	case IMSG_GET_INFO_CLIENTS_END_DATA:
+		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
+		break;
+	case IMSG_GET_INFO_SOCKETS_DATA:
+		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
+		break;
+	case IMSG_GET_INFO_SOCKETS_END_DATA:
+		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
+		break;
 	case IMSG_GET_INFO_THINGS_DATA:
 		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
 		break;

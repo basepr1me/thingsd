@@ -478,3 +478,52 @@ start_client_chk(struct thingsd *env)
 		client_chk((void *) env);
 	}
 }
+
+void
+clients_show_info(struct privsep *ps, struct imsg *imsg)
+{
+	char filter[THINGSD_MAXTHINGNAME];
+	struct client	*client, nci;
+	size_t		 n;
+
+	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_CLIENTS_REQUEST:
+
+		memcpy(filter, imsg->data, sizeof(filter));
+
+		TAILQ_FOREACH(client, thingsd_env->clients, entry) {
+			/* if (filter[0] == '\0' || memcmp(filter, */
+			/*     client->name, sizeof(filter)) == 0) { */
+
+				n = strlcpy(nci.name, client->name,
+				    sizeof(nci.name));
+				if (n >= sizeof(nci.name))
+					fatalx("%s: nci.name too long",
+					    __func__);
+
+				nci.subscribed = client->subscribed;
+				nci.fd = client->fd;
+				nci.port = client->port;
+				nci.tls = client->tls;
+				nci.subs = client->subs;
+
+				if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+				    IMSG_GET_INFO_CLIENTS_DATA,
+				    imsg->hdr.peerid, -1, &nci,
+				    sizeof(nci)) == -1)
+					return;
+
+			/* } */
+		}
+
+		if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+		    IMSG_GET_INFO_CLIENTS_END_DATA, imsg->hdr.peerid,
+			    -1, &nci, sizeof(nci)) == -1)
+				return;
+
+		break;
+	default:
+		log_debug("%s: error handling imsg", __func__);
+		break;
+	}
+}

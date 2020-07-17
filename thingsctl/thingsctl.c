@@ -42,6 +42,8 @@
 
 __dead void	 usage(void);
 int		 list_things_msg(struct imsg *);
+int		 list_clients_msg(struct imsg *);
+int		 list_sockets_msg(struct imsg *);
 int		 show_parent_msg(struct imsg *);
 int		 show_control_msg(struct imsg *);
 
@@ -105,8 +107,36 @@ main(int argc, char *argv[])
 	imsg_init(ibuf, ctl_sock);
 	done = 0;
 
+	/* Check for root only actions */
+	switch (res->action) {
+	case LOG_DEBUG:
+	case LOG_VERBOSE:
+	case LOG_BRIEF:
+	case KILL_CLIENT:
+	case SHOW_PACKETS:
+		if (geteuid() != 0)
+			errx(1, "need root privileges");
+		break;
+	default:
+		break;
+	}
+
 	/* Process user request. */
 	switch (res->action) {
+	case KILL_CLIENT:
+		imsg_compose(ibuf, IMSG_KILL_CLIENT, 0, 0, -1,
+		    res->name, strlen(res->name));
+		printf("\nKill request sent for client '%s'.\n", res->name);
+		done = 1;
+		break;
+	case LIST_CLIENTS:
+		imsg_compose(ibuf, IMSG_GET_INFO_CLIENTS_REQUEST, 0,
+		    0, -1, NULL, 0);
+		break;
+	case LIST_SOCKETS:
+		imsg_compose(ibuf, IMSG_GET_INFO_SOCKETS_REQUEST, 0,
+		    0, -1, NULL, 0);
+		break;
 	case LIST_THINGS:
 		imsg_compose(ibuf, IMSG_GET_INFO_THINGS_REQUEST, 0,
 		    0, -1, res->name, sizeof(res->name));
@@ -120,11 +150,15 @@ main(int argc, char *argv[])
 	case LOG_BRIEF:
 		imsg_compose(ibuf, IMSG_CTL_VERBOSE, 0, 0, -1,
 		    &verbose, sizeof(verbose));
-		printf("logging request sent.\n");
+		printf("\nLogging request sent.\n");
 		done = 1;
 		break;
 	case SHOW_CONTROL:
 		imsg_compose(ibuf, IMSG_GET_INFO_CONTROL_REQUEST, 0,
+		    0, -1, NULL, 0);
+		break;
+	case SHOW_PACKETS:
+		imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0,
 		    0, -1, NULL, 0);
 		break;
 	case SHOW_PARENT:
@@ -167,14 +201,23 @@ main(int argc, char *argv[])
 				break;
 
 			switch (res->action) {
+			case LIST_CLIENTS:
+				done = list_clients_msg(&imsg);
+				break;
+			case LIST_SOCKETS:
+				done = list_sockets_msg(&imsg);
+				break;
 			case LIST_THINGS:
 				done = list_things_msg(&imsg);
 				break;
-			case SHOW_PARENT:
-				done = show_parent_msg(&imsg);
-				break;
 			case SHOW_CONTROL:
 				done = show_control_msg(&imsg);
+				break;
+			case SHOW_PACKETS:
+				done = 1;
+				break;
+			case SHOW_PARENT:
+				done = show_parent_msg(&imsg);
 				break;
 			default:
 				break;
@@ -182,6 +225,7 @@ main(int argc, char *argv[])
 			imsg_free(&imsg);
 		}
 	}
+	printf("\n");
 	close(ctl_sock);
 	free(ibuf);
 
@@ -196,14 +240,14 @@ show_parent_msg(struct imsg *imsg)
 	switch (imsg->hdr.type) {
 	case IMSG_GET_INFO_PARENT_DATA:
 		npi = imsg->data;
-		printf("Parent says: Logging level is ");
+		printf("\nParent says: Logging level is ");
 		if (npi->verbose == 2)
 			printf("debug");
 		else if (npi->verbose == 1)
 			printf("verbose");
 		else
 			printf("brief");
-		printf(" (%d)\n", npi->verbose);
+		printf(" (%d).\n", npi->verbose);
 		break;
 	case IMSG_GET_INFO_PARENT_END_DATA:
 	case IMSG_CTL_END:
@@ -223,14 +267,14 @@ show_control_msg(struct imsg *imsg)
 	switch (imsg->hdr.type) {
 	case IMSG_GET_INFO_CONTROL_DATA:
 		nci = imsg->data;
-		printf("Control says: Logging level is ");
+		printf("\nControl says: Logging level is ");
 		if (nci->verbose == 2)
 			printf("debug");
 		else if (nci->verbose == 1)
 			printf("verbose");
 		else
 			printf("brief");
-		printf(" (%d)\n", nci->verbose);
+		printf(" (%d).\n", nci->verbose);
 		break;
 	case IMSG_GET_INFO_CONTROL_END_DATA:
 	case IMSG_CTL_END:
@@ -245,12 +289,11 @@ show_control_msg(struct imsg *imsg)
 int
 list_things_msg(struct imsg *imsg)
 {
-	struct thing *nti;
+	struct thing	*nti;
 
 	switch (imsg->hdr.type) {
 	case IMSG_GET_INFO_THINGS_DATA:
 		nti = (struct thing *) imsg->data;
-
 
 		printf("\nThing Name:\t\t\t%s\n", nti->name);
 		switch(nti->type) {
@@ -295,6 +338,69 @@ list_things_msg(struct imsg *imsg)
 
 		break;
 	case IMSG_GET_INFO_THINGS_END_DATA:
+	case IMSG_CTL_END:
+		return (1);
+	default:
+		break;
+	}
+
+	return (0);
+}
+
+int
+list_clients_msg(struct imsg *imsg)
+{
+	struct client	*nci;
+
+	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_CLIENTS_DATA:
+		nci = (struct client *) imsg->data;
+
+		if (nci->subscribed == false)
+			break;
+
+		printf("\nClient Name:\t\t\t%s\n", nci->name);
+		printf("\tfd:\t\t\t%d\n", nci->fd);
+		printf("\tPort:\t\t\t%d\n", nci->port);
+		if (nci->tls == true)
+			printf("\tTLS:\t\t\tyes\n");
+		printf("\tSubscriptions:\t\t%zu\n", nci->subs);
+		break;
+	case IMSG_GET_INFO_CLIENTS_END_DATA:
+	case IMSG_CTL_END:
+		return (1);
+	default:
+		break;
+	}
+
+	return (0);
+}
+
+int
+list_sockets_msg(struct imsg *imsg)
+{
+	struct socket	*nsi;
+
+	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_SOCKETS_DATA:
+		nsi = (struct socket *) imsg->data;
+
+		printf("\n");
+		if (strcmp(nsi->name, "") == 0)
+			printf("Socket Name:\t\t\tReceive socket\n");
+		else
+			printf("Socket Name:\t\t\t%s\n", nsi->name);
+		printf("\tfd:\t\t\t%d\n", nsi->fd);
+		printf("\tPort:\t\t\t%d\n", nsi->port);
+		if (nsi->tls == true)
+			printf("\tTLS:\t\t\tyes\n\n");
+		printf("\tClient Count:\t\t%zu\n", nsi->client_cnt);
+		if (nsi->max_clients == 0)
+			printf("\tMax Clients:\t\tunlimited\n");
+		else
+			printf("\tMax Clients:\t\t%zu\n", nsi->max_clients);
+		break;
+	case IMSG_GET_INFO_SOCKETS_END_DATA:
 	case IMSG_CTL_END:
 		return (1);
 	default:

@@ -473,3 +473,52 @@ socket_err(struct bufferevent *bev, short error, void *arg)
 		}
 	}
 }
+
+void
+sockets_show_info(struct privsep *ps, struct imsg *imsg)
+{
+	char filter[THINGSD_MAXTHINGNAME];
+	struct socket	*socket, nsi;
+	size_t		 n;
+
+	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_SOCKETS_REQUEST:
+
+		memcpy(filter, imsg->data, sizeof(filter));
+
+		TAILQ_FOREACH(socket, thingsd_env->sockets, entry) {
+			/* if (filter[0] == '\0' || memcmp(filter, */
+			/*     socket->name, sizeof(filter)) == 0) { */
+
+				n = strlcpy(nsi.name, socket->name,
+				    sizeof(nsi.name));
+				if (n >= sizeof(nsi.name))
+					fatalx("%s: nsi.name too long",
+					    __func__);
+
+				nsi.fd = socket->fd;
+				nsi.port = socket->port;
+				nsi.tls = socket->tls;
+				nsi.client_cnt = socket->client_cnt;
+				nsi.max_clients = socket->max_clients;
+
+				if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+				    IMSG_GET_INFO_SOCKETS_DATA,
+				    imsg->hdr.peerid, -1, &nsi,
+				    sizeof(nsi)) == -1)
+					return;
+
+			/* } */
+		}
+
+		if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+		    IMSG_GET_INFO_SOCKETS_END_DATA, imsg->hdr.peerid,
+			    -1, &nsi, sizeof(nsi)) == -1)
+				return;
+
+		break;
+	default:
+		log_debug("%s: error handling imsg", __func__);
+		break;
+	}
+}

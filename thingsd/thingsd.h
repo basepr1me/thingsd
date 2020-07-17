@@ -58,14 +58,27 @@ enum imsg_type {
 	IMSG_GET_INFO_PARENT_REQUEST = IMSG_PROC_MAX,
 	IMSG_GET_INFO_PARENT_DATA,
 	IMSG_GET_INFO_PARENT_END_DATA,
+
+	IMSG_GET_INFO_CONTROL_REQUEST,
+	IMSG_GET_INFO_CONTROL_DATA,
+	IMSG_GET_INFO_CONTROL_END_DATA,
+
 	IMSG_GET_INFO_THINGS_REQUEST,
 	IMSG_GET_INFO_THINGS_REQUEST_ROOT,
 	IMSG_GET_INFO_THINGS_DATA,
 	IMSG_GET_INFO_THINGS_END_DATA,
-	IMSG_GET_INFO_CONTROL_REQUEST,
-	IMSG_GET_INFO_CONTROL_DATA,
-	IMSG_GET_INFO_CONTROL_END_DATA,
+
+	IMSG_GET_INFO_CLIENTS_REQUEST,
+	IMSG_GET_INFO_CLIENTS_DATA,
+	IMSG_GET_INFO_CLIENTS_END_DATA,
+
+	IMSG_GET_INFO_SOCKETS_REQUEST,
+	IMSG_GET_INFO_SOCKETS_DATA,
+	IMSG_GET_INFO_SOCKETS_END_DATA,
+
 	IMSG_ADD_THING,
+
+	IMSG_KILL_CLIENT,
 };
 
 enum socktypes {
@@ -243,6 +256,7 @@ void	 client_do_chk(struct thingsd *);
 void	 client_wr_things(struct client *, struct thing *, size_t);
 void	 client_tls_readcb(int, short, void *);
 void	 client_tls_writecb(int, short, void *);
+void	 clients_show_info(struct privsep *, struct imsg *);
 
 /* serial.c */
 void	 open_things(struct thingsd *, bool);
@@ -257,6 +271,7 @@ void	 socket_wr(struct bufferevent *, void *);
 void	 socket_err(struct bufferevent *, short, void *);
 int	 create_socket(int, char *, int);
 int	 open_client_socket(char *, int);
+void	 sockets_show_info(struct privsep *, struct imsg *);
 
 /* thingsd.c */
 void	 thingsd_reload(int);

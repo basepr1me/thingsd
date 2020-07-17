@@ -78,6 +78,10 @@ control_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_GET_INFO_PARENT_END_DATA:
 	case IMSG_GET_INFO_THINGS_DATA:
 	case IMSG_GET_INFO_THINGS_END_DATA:
+	case IMSG_GET_INFO_CLIENTS_DATA:
+	case IMSG_GET_INFO_CLIENTS_END_DATA:
+	case IMSG_GET_INFO_SOCKETS_DATA:
+	case IMSG_GET_INFO_SOCKETS_END_DATA:
 		if ((c = control_connbyfd(imsg->hdr.peerid)) == NULL) {
 			log_warnx("%s: fd %d: not found",
 			    __func__, imsg->hdr.peerid);
@@ -328,8 +332,11 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			break;
 
 		switch (imsg.hdr.type) {
+		case IMSG_KILL_CLIENT:
 		case IMSG_GET_INFO_PARENT_REQUEST:
 		case IMSG_GET_INFO_THINGS_REQUEST:
+		case IMSG_GET_INFO_CLIENTS_REQUEST:
+		case IMSG_GET_INFO_SOCKETS_REQUEST:
 		case IMSG_GET_INFO_CONTROL_REQUEST:
 			break;
 		default:
@@ -373,8 +380,11 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			    IMSG_GET_INFO_CONTROL_END_DATA, 0, 0, -1,
 			    &nci, sizeof(struct thingsd_control_info));
 			break;
+		case IMSG_KILL_CLIENT:
 		case IMSG_GET_INFO_PARENT_REQUEST:
 		case IMSG_GET_INFO_THINGS_REQUEST:
+		case IMSG_GET_INFO_CLIENTS_REQUEST:
+		case IMSG_GET_INFO_SOCKETS_REQUEST:
 			imsg.hdr.peerid = fd;
 
 			if (euid == 0 &&
