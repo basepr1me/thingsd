@@ -1,0 +1,9 @@
+**/obj
+**/*.d
+**/*.o
+.gitignore
+**/.gitignore
+**/parse.c
+**/parse.h
+thingsd/thingsd
+thingsctl/thingsctl

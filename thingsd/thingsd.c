@@ -329,6 +329,13 @@ main(int argc, char **argv)
 int
 thingsd_configure(struct privsep *ps)
 {
+	if (unveil(THINGSD_CONF, "r") == -1)
+		err(1, "unveil");
+	if (unveil("/dev", "rw") == -1)
+		err(1, "unveil");
+	if (unveil(NULL, NULL) != 0)
+		err(1, "unveil");
+
 	if (pledge("stdio rpath wpath inet proc tty dns", NULL) == -1)
 		err(1, "pledge");
 
