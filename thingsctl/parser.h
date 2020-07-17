@@ -19,6 +19,7 @@ enum actions {
 	NONE,
 	LIST,
 	LIST_THINGS,
+	LOG_DEBUG,
 	LOG_VERBOSE,
 	LOG_BRIEF,
 	SHOW,

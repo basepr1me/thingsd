@@ -660,6 +660,7 @@ proc_dispatch(int fd, short event, void *arg)
 		 */
 		switch (imsg.hdr.type) {
 		case IMSG_CTL_VERBOSE:
+			log_info("%s", __func__);
 			IMSG_SIZE_CHECK(&imsg, &verbose);
 			memcpy(&verbose, imsg.data, sizeof(verbose));
 			log_setverbose(verbose);

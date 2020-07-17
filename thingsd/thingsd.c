@@ -90,6 +90,7 @@ thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 		thingsd_reload(v);
 		break;
 	case IMSG_CTL_VERBOSE:
+			log_info("%s", __func__);
 		IMSG_SIZE_CHECK(imsg, &verbose);
 		memcpy(&verbose, imsg->data, sizeof(verbose));
 		log_setverbose(verbose);

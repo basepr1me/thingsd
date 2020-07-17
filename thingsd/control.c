@@ -356,6 +356,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			c->flags |= CTL_CONN_NOTIFY;
 			break;
 		case IMSG_CTL_VERBOSE:
+			log_info("%s", __func__);
 			IMSG_SIZE_CHECK(&imsg, &v);
 
 			memcpy(&v, imsg.data, sizeof(v));
@@ -381,6 +382,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			    IMSG_GET_INFO_THINGS_REQUEST)
 				imsg.hdr.type =
 				IMSG_GET_INFO_THINGS_REQUEST_ROOT;
+
 			if (proc_compose_imsg(ps, PROC_PARENT, -1,
 			    imsg.hdr.type, imsg.hdr.peerid, -1,
 			    imsg.data, IMSG_DATA_SIZE(&imsg)) == -1) {

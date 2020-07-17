@@ -63,6 +63,7 @@ static const struct token t_main[] = {
 };
 
 static const struct token t_log[] = {
+	{KEYWORD,	"debug",	LOG_DEBUG,	NULL},
 	{KEYWORD,	"verbose",	LOG_VERBOSE,	NULL},
 	{KEYWORD,	"brief",	LOG_BRIEF,	NULL},
 	{ENDTOKEN,	"",		NONE,		NULL}

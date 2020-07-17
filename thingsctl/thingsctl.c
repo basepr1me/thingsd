@@ -111,15 +111,18 @@ main(int argc, char *argv[])
 		imsg_compose(ibuf, IMSG_GET_INFO_THINGS_REQUEST, 0,
 		    0, -1, res->name, sizeof(res->name));
 		break;
+	case LOG_DEBUG:
+		verbose++;
+		/* FALLTHROUGH */
+	case LOG_VERBOSE:
+		verbose++;
+		/* FALLTHROUGH */
 	case LOG_BRIEF:
 		imsg_compose(ibuf, IMSG_CTL_VERBOSE, 0, 0, -1,
 		    &verbose, sizeof(verbose));
 		printf("logging request sent.\n");
 		done = 1;
 		break;
-	case LOG_VERBOSE:
-		verbose = 1;
-		/* FALLTHROUGH */
 	case SHOW_CONTROL:
 		imsg_compose(ibuf, IMSG_GET_INFO_CONTROL_REQUEST, 0,
 		    0, -1, NULL, 0);
@@ -185,8 +188,14 @@ show_parent_msg(struct imsg *imsg)
 	switch (imsg->hdr.type) {
 	case IMSG_GET_INFO_PARENT_DATA:
 		npi = imsg->data;
-		printf("parent says: '%s' (%s)\n", npi->text,
-		    npi->verbose ? "verbose" : "brief");
+		printf("parent says: Logging level is ");
+		if (npi->verbose == 2)
+			printf("debug");
+		else if (npi->verbose == 1)
+			printf("verbose");
+		else
+			printf("brief");
+		printf(" (%d)\n", npi->verbose);
 		break;
 	case IMSG_GET_INFO_PARENT_END_DATA:
 	case IMSG_CTL_END:
@@ -228,9 +237,14 @@ show_control_msg(struct imsg *imsg)
 	switch (imsg->hdr.type) {
 	case IMSG_GET_INFO_CONTROL_DATA:
 		nci = imsg->data;
-		printf("control says: '%s'",
-		    nci->verbose ? "verbose" : "brief");
-		printf("\n");
+		printf("parent says: Logging level is ");
+		if (nci->verbose == 2)
+			printf("debug");
+		else if (nci->verbose == 1)
+			printf("verbose");
+		else
+			printf("brief");
+		printf(" (%d)\n", nci->verbose);
 		break;
 	case IMSG_GET_INFO_CONTROL_END_DATA:
 	case IMSG_CTL_END:
