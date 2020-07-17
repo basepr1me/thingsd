@@ -1,0 +1,82 @@
+.\"
+.\" Copyright (c) 2016-2019 Tracey Emery <tracey@traceyemery.net>
+.\"
+.\" Permission to use, copy, modify, and distribute this software for any
+.\" purpose with or without fee is hereby granted, provided that the above
+.\" copyright notice and this permission notice appear in all copies.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\" WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\" MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\" ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\"
+.Dd $Mdocdate: April 20 2019 $
+.Dt THINGSCTL 8
+.Os
+.Sh NAME
+.Nm thingsctl
+.Nd control the thingsd daemon
+.Sh SYNOPSIS
+.Nm
+.Op Fl s Ar socket
+.Ar command
+.Op Ar argument ...
+.Sh DESCRIPTION
+The
+.Nm
+program controls the
+.Xr thingsd 8
+daemon.
+.Pp
+The following options are available:
+.Bl -tag -width Ds
+.It Fl s Ar socket
+Use
+.Ar socket
+instead of the default
+.Pa /var/run/thingsd.sock
+to communicate with
+.Xr thingsd 8 .
+.El
+.Pp
+The following commands are available:
+.Bl -tag -width Ds
+.It Cm list clients
+Show all clients connected to things.
+.It Cm list sockets
+Show a summary of all sockets being used by the thingsd daemon.
+.It Cm list things
+Show all things.
+This will not list non-persistent things.
+.It Cm log brief
+Disable verbose logging.
+.It Cm log verbose
+Enable verbose logging.
+.It Cm log debug
+Enable very noisy debug logging.
+.It Cm kill Ar string
+Disconnect a subscribed client from thingsd by client name.
+.It Cm show Ar string
+View string version of a thing's packets by its name.
+Showing packets blocks all other calls.
+A thing could be sending binary data!
+Use at your own risk.
+.El
+.Sh FILES
+.Bl -tag -width "/var/run/thingsd.sockXX" -compact
+.It Pa /var/run/thingsd.sock
+.Ux Ns -domain
+socket used for communication with
+.Xr thingsd 8 .
+.El
+.Sh SEE ALSO
+.Xr thingsd.conf 5 ,
+.Xr thingsd 8
+.Sh HISTORY
+The
+.Nm
+program first appeared in
+.Ox 6.5 .
