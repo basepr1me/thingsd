@@ -4,9 +4,9 @@ SRCS =		config.c control.c things.c log.c thingsd.c parse.y proc.c \
 
 MAN =		thingsd.8 thingsd.conf.5
 
-INC_C_DIR =	/usr/local
-BINDIR? =	${INC_C_DIR}/sbin
-MANDIR? =	${INC_C_DIR}/man/man
+PREFIX=		/usr/local
+BINDIR?=	${PREFIX}/sbin
+MANDIR?=	${PREFIX}/man/man
 
 CFLAGS +=	-Wall -I${.CURDIR}
 CFLAGS +=	-Wstrict-prototypes -Wmissing-prototypes
