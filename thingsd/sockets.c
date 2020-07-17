@@ -487,8 +487,8 @@ sockets_show_info(struct privsep *ps, struct imsg *imsg)
 		memcpy(filter, imsg->data, sizeof(filter));
 
 		TAILQ_FOREACH(socket, thingsd_env->sockets, entry) {
-			/* if (filter[0] == '\0' || memcmp(filter, */
-			/*     socket->name, sizeof(filter)) == 0) { */
+			if (filter[0] == '\0' || memcmp(filter,
+			    socket->name, sizeof(filter)) == 0) {
 
 				n = strlcpy(nsi.name, socket->name,
 				    sizeof(nsi.name));
@@ -508,7 +508,7 @@ sockets_show_info(struct privsep *ps, struct imsg *imsg)
 				    sizeof(nsi)) == -1)
 					return;
 
-			/* } */
+			}
 		}
 
 		if (proc_compose_imsg(ps, PROC_CONTROL, -1,

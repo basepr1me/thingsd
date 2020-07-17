@@ -492,8 +492,8 @@ clients_show_info(struct privsep *ps, struct imsg *imsg)
 		memcpy(filter, imsg->data, sizeof(filter));
 
 		TAILQ_FOREACH(client, thingsd_env->clients, entry) {
-			/* if (filter[0] == '\0' || memcmp(filter, */
-			/*     client->name, sizeof(filter)) == 0) { */
+			if (filter[0] == '\0' || memcmp(filter,
+			    client->name, sizeof(filter)) == 0) {
 
 				n = strlcpy(nci.name, client->name,
 				    sizeof(nci.name));
@@ -513,7 +513,7 @@ clients_show_info(struct privsep *ps, struct imsg *imsg)
 				    sizeof(nci)) == -1)
 					return;
 
-			/* } */
+			}
 		}
 
 		if (proc_compose_imsg(ps, PROC_CONTROL, -1,

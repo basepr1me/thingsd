@@ -131,11 +131,11 @@ main(int argc, char *argv[])
 		break;
 	case LIST_CLIENTS:
 		imsg_compose(ibuf, IMSG_GET_INFO_CLIENTS_REQUEST, 0,
-		    0, -1, NULL, 0);
+		    0, -1, res->name, sizeof(res->name));
 		break;
 	case LIST_SOCKETS:
 		imsg_compose(ibuf, IMSG_GET_INFO_SOCKETS_REQUEST, 0,
-		    0, -1, NULL, 0);
+		    0, -1, res->name, sizeof(res->name));
 		break;
 	case LIST_THINGS:
 		imsg_compose(ibuf, IMSG_GET_INFO_THINGS_REQUEST, 0,
@@ -214,7 +214,6 @@ main(int argc, char *argv[])
 				done = show_control_msg(&imsg);
 				break;
 			case SHOW_PACKETS:
-				done = 1;
 				break;
 			case SHOW_PARENT:
 				done = show_parent_msg(&imsg);

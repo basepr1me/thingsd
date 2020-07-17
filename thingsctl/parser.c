@@ -38,6 +38,7 @@ enum token_type {
 	NOTOKEN,
 	ENDTOKEN,
 	CLIENTNAME,
+	SOCKETNAME,
 	THINGNAME,
 	KEYWORD
 };
@@ -54,14 +55,16 @@ static const struct token t_log[];
 static const struct token t_main[];
 static const struct token t_show[];
 static const struct token t_client_name[];
+static const struct token t_kill_name[];
 static const struct token t_thing_name[];
+static const struct token t_socket_name[];
 
 static const struct token t_main[] = {
 	{KEYWORD,	"reload",	RELOAD,		NULL},
 	{KEYWORD,	"list",		LIST,		t_list},
 	{KEYWORD,	"show",		SHOW,		t_show},
 	{KEYWORD,	"log",		NONE,		t_log},
-	{KEYWORD,	"kill",		KILL_CLIENT,	t_client_name},
+	{KEYWORD,	"kill",		NONE,		t_kill_name},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -82,7 +85,9 @@ static const struct token t_list[] = {
 static const struct token t_show[] = {
 	{KEYWORD,	"parent",	SHOW_PARENT,	NULL},
 	{KEYWORD,	"control",	SHOW_CONTROL,	NULL},
-	{KEYWORD,	"thing",	SHOW_PACKETS,	t_thing_name},
+	{KEYWORD,	"client",	NONE,		t_client_name},
+	{KEYWORD,	"socket",	NONE,		t_socket_name},
+	{KEYWORD,	"thing",	NONE,		t_thing_name},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -92,7 +97,17 @@ static const struct token t_thing_name[] = {
 };
 
 static const struct token t_client_name[] = {
-	{CLIENTNAME,	"",		NONE,		NULL},
+	{CLIENTNAME,	"",		LIST_CLIENTS,	NULL},
+	{ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_kill_name[] = {
+	{CLIENTNAME,	"",		KILL_CLIENT,	NULL},
+	{ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_socket_name[] = {
+	{SOCKETNAME,	"",		LIST_SOCKETS,	NULL},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -153,6 +168,7 @@ match_token(const char *word, const struct token *table,
 			break;
 		case THINGNAME:
 		case CLIENTNAME:
+		case SOCKETNAME:
 			if (!match && word != NULL && strlen(word) > 0) {
 				memset(res->name, 0,
 				    sizeof(res->name));
@@ -205,6 +221,9 @@ show_valid_args(const struct token *table)
 			break;
 		case THINGNAME:
 			fprintf(stderr, " <thing_name>\n");
+			break;
+		case SOCKETNAME:
+			fprintf(stderr, " <socket_name>\n");
 			break;
 		case CLIENTNAME:
 			fprintf(stderr, " <client_name>\n");
