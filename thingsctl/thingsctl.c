@@ -158,8 +158,8 @@ main(int argc, char *argv[])
 		    0, -1, NULL, 0);
 		break;
 	case SHOW_PACKETS:
-		imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0,
-		    0, -1, NULL, 0);
+		/* imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0, */
+		/*     0, -1, NULL, 0); */
 		break;
 	case SHOW_PARENT:
 		imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0,

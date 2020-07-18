@@ -99,6 +99,7 @@ thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_GET_INFO_SOCKETS_REQUEST:
 		sockets_show_info(ps, imsg);
 		break;
+	case IMSG_GET_INFO_THINGS_REQUEST:
 	case IMSG_GET_INFO_THINGS_REQUEST_ROOT:
 		things_show_info(ps, imsg);
 		break;
@@ -140,25 +141,8 @@ thingsd_dispatch_things(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
 	struct privsep		*ps = p->p_ps;
 
+	log_info("%s", __func__);
 	switch (imsg->hdr.type) {
-	case IMSG_GET_INFO_CLIENTS_DATA:
-		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
-		break;
-	case IMSG_GET_INFO_CLIENTS_END_DATA:
-		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
-		break;
-	case IMSG_GET_INFO_SOCKETS_DATA:
-		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
-		break;
-	case IMSG_GET_INFO_SOCKETS_END_DATA:
-		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
-		break;
-	case IMSG_GET_INFO_THINGS_DATA:
-		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
-		break;
-	case IMSG_GET_INFO_THINGS_END_DATA:
-		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
-		break;
 	case IMSG_ADD_THING:
 		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
 		break;
