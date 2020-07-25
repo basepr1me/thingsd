@@ -287,21 +287,23 @@ things_shutdown(void)
 void
 things_echo_pkt(struct privsep *ps, struct imsg *imsg)
 {
-	if (thingsd_env->thing_pkt.exists)
-		return;
-	thingsd_env->thing_pkt.ps = *ps;
-	thingsd_env->thing_pkt.imsg = *imsg;
-	memcpy(thingsd_env->thing_pkt.name, imsg->data,
-	    sizeof(thingsd_env->thing_pkt.name));
-	thingsd_env->thing_pkt.exists = true;
+	/* if (thingsd_env->packet_client.exists) */
+	/* 	return; */
+	thingsd_env->packet_client_count++;
+
+
+	thingsd_env->packet_client.ps = *ps;
+	thingsd_env->packet_client.imsg = *imsg;
+	memcpy(thingsd_env->packet_client.name, imsg->data,
+	    sizeof(thingsd_env->packet_client.name));
 }
 
 void
 things_stop_pkt(void)
 {
-	/* memset(thingsd_env->thing_pkt.name, 0, */
-	/*     sizeof(thingsd_env->thing_pkt.name)); */
-	thingsd_env->thing_pkt.exists = false;
+	/* memset(thingsd_env->packet_client.name, 0, */
+	/*     sizeof(thingsd_env->packet_client.name)); */
+	thingsd_env->packet_client_count--;
 }
 
 void
@@ -492,7 +494,7 @@ do_reconn(void)
 	TAILQ_FOREACH_SAFE(dead_thing,
 	    thingsd_env->dead_things->dead_things_list, entry, tdead_thing) {
 		TAILQ_FOREACH(thing, thingsd_env->things, entry) {
-			if (strcmp(thing->name, dead_thing->name) == 0 &&
+			if (strcmp(thing->name, dead_thing->name) == 0 && 
 			    thing->exists) {
 				TAILQ_REMOVE(thingsd_env->dead_things->
 				    dead_things_list,
@@ -511,8 +513,8 @@ do_reconn(void)
 }
 
 void
-send_thing_pkt(struct privsep *ps, struct imsg *imsg, char *name, char *pkt,
-    int len)
+send_to_packet_client(struct privsep *ps, struct imsg *imsg, char *name,
+    char *pkt, int len)
 {
 	if (proc_compose_imsg(ps, PROC_CONTROL, -1,
 	    IMSG_SHOW_PACKETS_DATA, imsg->hdr.peerid, -1, pkt, len) == -1)

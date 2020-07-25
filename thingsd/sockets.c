@@ -440,13 +440,13 @@ socket_rd(struct bufferevent *bev, void *arg)
 				}
 			}
 
-			if (env->control_pkt.exists) {
-				if (strlen(env->control_pkt.name) != 0)
+			if (env->packet_client_count > 0) {
+				if (strlen(env->packet_client.name) != 0)
 					if ((snm = strcmp(thing->name,
-					    env->control_pkt.name)) == 0)
-						send_control_pkt(
-						    &env->control_pkt.ps,
-						    &env->control_pkt.imsg,
+					    env->packet_client.name)) == 0)
+						send_to_packet_client(
+						    &env->packet_client.ps,
+						    &env->packet_client.imsg,
 						    thing->name, pkt, len);
 			}
 

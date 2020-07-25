@@ -208,20 +208,18 @@ struct dead_things {
 	volatile sig_atomic_t	 run;
 };
 
-struct thing_pkt {
-	TAILQ_ENTRY(thing_pkt) entry;
+struct packet_client {
+	TAILQ_ENTRY(packet_client)	 entry;
 	struct privsep		 ps;
 	struct imsg		 imsg;
 	char			 name[THINGSD_MAXNAME];
-	bool			 exists;
 };
-TAILQ_HEAD(controlpacketlist, thing_pkt);
+TAILQ_HEAD(packetclientlist, packet_client);
 
 struct thingsd {
 	struct thinglist	*things;
 	struct clientlist	*clients;
 	struct socketlist	*sockets;
-	struct thingpktlist	*control
 
 	struct privsep		 thingsd_ps;
 	const char		*thingsd_conffile;
@@ -249,7 +247,12 @@ struct thingsd {
 	struct event		 things_evsigquit;
 	struct event		 things_evsigterm;
 	struct event		 things_evsigint;
-	struct thing_pkt	 thing_pkt;
+
+	/* control packets */
+	struct packetclientlist	*packet_clients;
+	int			 packet_client_count;
+	/* XXX: kill this when converted to multiple packet clients */
+	struct packet_client	 packet_client;
 };
 
 extern struct thingsd	*thingsd_env;
@@ -301,7 +304,8 @@ void	 things_sighdlr(int, short, void *);
 void	 things_show_info(struct privsep *, struct imsg *);
 void	 things_echo_pkt(struct privsep *, struct imsg *);
 void	 things_stop_pkt(void);
-void	 send_thing_pkt(struct privsep *, struct imsg *, char *, char *, int);
+void	 send_to_packet_client(struct privsep *, struct imsg *, char *, char *,
+	    int);
 
 /* control.c */
 int	 config_init(struct thingsd *);
