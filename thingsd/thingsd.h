@@ -48,7 +48,7 @@
 #define TLSFLAG_BITS		 "\10\01CA\02CRL\03OPTIONAL"
 
 #define THINGSD_MAXTEXT		 511
-#define THINGSD_MAXTHINGNAME	 16
+#define THINGSD_MAXNAME		 16
 
 #define THINGS_NUMPROC		 3
 
@@ -76,8 +76,11 @@ enum imsg_type {
 	IMSG_GET_INFO_SOCKETS_DATA,
 	IMSG_GET_INFO_SOCKETS_END_DATA,
 
-	IMSG_ADD_THING,
+	IMSG_SHOW_PACKETS_REQUEST,
+	IMSG_SHOW_PACKETS_DATA,
+	IMSG_SHOW_PACKETS_END_DATA,
 
+	IMSG_ADD_THING,
 	IMSG_KILL_CLIENT,
 };
 
@@ -103,7 +106,7 @@ struct client {
 	struct bufferevent	*bev;
 	struct socket		*socket;
 	bool			 subscribed;
-	char			 name[THINGSD_MAXTEXT];
+	char			 name[THINGSD_MAXNAME];
 	char			*sub_names[THINGSD_MAXTEXT];
 	int			 fd;
 	int			 port;
@@ -119,7 +122,7 @@ TAILQ_HEAD(clientlist, client);
 struct socket {
 	TAILQ_ENTRY(socket)	 entry;
 	struct event		*ev;
-	char			 name[THINGSD_MAXTEXT];
+	char			 name[THINGSD_MAXNAME];
 	int			 fd;
 	int			 port;
 	size_t			 client_cnt;
@@ -143,7 +146,7 @@ struct thing {
 
 	char			 iface[THINGSD_MAXTEXT];
 	char			 ipaddr[THINGSD_MAXTEXT];
-	char			 name[THINGSD_MAXTHINGNAME];
+	char			 name[THINGSD_MAXNAME];
 	char			 parity[THINGSD_MAXTEXT];
 	char			 password[THINGSD_MAXTEXT];
 	char			 location[THINGSD_MAXTEXT];
@@ -205,10 +208,20 @@ struct dead_things {
 	volatile sig_atomic_t	 run;
 };
 
+struct thing_pkt {
+	TAILQ_ENTRY(thing_pkt) entry;
+	struct privsep		 ps;
+	struct imsg		 imsg;
+	char			 name[THINGSD_MAXNAME];
+	bool			 exists;
+};
+TAILQ_HEAD(controlpacketlist, thing_pkt);
+
 struct thingsd {
 	struct thinglist	*things;
 	struct clientlist	*clients;
 	struct socketlist	*sockets;
+	struct thingpktlist	*control
 
 	struct privsep		 thingsd_ps;
 	const char		*thingsd_conffile;
@@ -236,6 +249,7 @@ struct thingsd {
 	struct event		 things_evsigquit;
 	struct event		 things_evsigterm;
 	struct event		 things_evsigint;
+	struct thing_pkt	 thing_pkt;
 };
 
 extern struct thingsd	*thingsd_env;
@@ -285,6 +299,9 @@ void	 add_reconn(struct thing *);
 void	 do_reconn(void);
 void	 things_sighdlr(int, short, void *);
 void	 things_show_info(struct privsep *, struct imsg *);
+void	 things_echo_pkt(struct privsep *, struct imsg *);
+void	 things_stop_pkt(void);
+void	 send_thing_pkt(struct privsep *, struct imsg *, char *, char *, int);
 
 /* control.c */
 int	 config_init(struct thingsd *);

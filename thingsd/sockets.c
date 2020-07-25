@@ -414,7 +414,7 @@ socket_rd(struct bufferevent *bev, void *arg)
 	struct thing		*thing = NULL, *tthing;
 	struct client		*client;
 	size_t			 len;
-	int			 fd = bev->ev_read.ev_fd;
+	int			 fd = bev->ev_read.ev_fd, snm;
 	size_t			 n;
 	char			*pkt = NULL;
 
@@ -440,11 +440,22 @@ socket_rd(struct bufferevent *bev, void *arg)
 				}
 			}
 
+			if (env->control_pkt.exists) {
+				if (strlen(env->control_pkt.name) != 0)
+					if ((snm = strcmp(thing->name,
+					    env->control_pkt.name)) == 0)
+						send_control_pkt(
+						    &env->control_pkt.ps,
+						    &env->control_pkt.imsg,
+						    thing->name, pkt, len);
+			}
+
 			free(pkt);
 			pkt = NULL;
 
 		}
 	}
+	free(pkt);
 }
 
 void
@@ -477,7 +488,7 @@ socket_err(struct bufferevent *bev, short error, void *arg)
 void
 sockets_show_info(struct privsep *ps, struct imsg *imsg)
 {
-	char filter[THINGSD_MAXTHINGNAME];
+	char filter[THINGSD_MAXNAME];
 	struct socket	*socket, nsi;
 	size_t		 n;
 

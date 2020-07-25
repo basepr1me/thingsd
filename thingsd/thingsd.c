@@ -75,10 +75,19 @@ thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct privsep	*ps = p->p_ps;
 	int		 res = 0, cmd = 0, verbose;
 	unsigned int	 v = 0;
-	char		 client_name[THINGSD_MAXTHINGNAME];
+	char		 client_name[THINGSD_MAXNAME];
 	struct client	*client;
 
 	switch (imsg->hdr.type) {
+	case IMSG_SHOW_PACKETS_END_DATA:
+		things_stop_pkt();
+		break;
+	case IMSG_SHOW_PACKETS_REQUEST:
+		IMSG_SIZE_CHECK(imsg, &v);
+		if (imsg->data == NULL)
+			break;
+		things_echo_pkt(ps, imsg);
+		break;
 	case IMSG_KILL_CLIENT:
 		IMSG_SIZE_CHECK(imsg, &v);
 		if (imsg->data == NULL)

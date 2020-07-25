@@ -482,7 +482,7 @@ start_client_chk(struct thingsd *env)
 void
 clients_show_info(struct privsep *ps, struct imsg *imsg)
 {
-	char filter[THINGSD_MAXTHINGNAME];
+	char filter[THINGSD_MAXNAME];
 	struct client	*client, nci;
 	size_t		 n;
 

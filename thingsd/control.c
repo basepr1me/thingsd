@@ -43,16 +43,19 @@
 
 struct ctl_connlist ctl_conns;
 
+int	 show_ctl, show_fd;
+
 struct ctl_conn *control_connbyfd(int);
 void	 control_accept(int, short, void *);
-void	 control_close(int, struct control_sock *);
+void	 control_close(struct privsep *, struct imsg *, int,
+	    struct control_sock *);
 void	 control_dispatch_imsg(int, short, void *);
 int	 control_dispatch_parent(int, struct privsep_proc *, struct imsg *);
 void	 control_imsg_forward(struct imsg *);
 void	 control_run(struct privsep *, struct privsep_proc *, void *);
 
 static struct privsep_proc procs[] = {
-	{ "parent",	PROC_PARENT,	control_dispatch_parent }
+	{ "parent",	PROC_PARENT,	control_dispatch_parent },
 };
 
 void
@@ -74,6 +77,8 @@ control_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct ctl_conn		*c;
 
 	switch (imsg->hdr.type) {
+	case IMSG_SHOW_PACKETS_DATA:
+	case IMSG_SHOW_PACKETS_END_DATA:
 	case IMSG_GET_INFO_PARENT_DATA:
 	case IMSG_GET_INFO_PARENT_END_DATA:
 	case IMSG_GET_INFO_THINGS_DATA:
@@ -261,13 +266,22 @@ control_connbyfd(int fd)
 }
 
 void
-control_close(int fd, struct control_sock *cs)
+control_close(struct privsep *ps, struct imsg *imsg, int fd,
+    struct control_sock *cs)
 {
 	struct ctl_conn	*c;
 
 	if ((c = control_connbyfd(fd)) == NULL) {
 		log_warn("%s: fd %d: not found", __func__, fd);
 		return;
+	}
+
+	if (fd == show_fd) {
+		show_ctl = 0;
+		if (proc_compose_imsg(ps, PROC_PARENT, -1,
+		    IMSG_SHOW_PACKETS_END_DATA, 0, -1,
+		    NULL, 0) == -1)
+			log_warn("shit");
 	}
 
 	msgbuf_clear(&c->iev.ibuf.w);
@@ -310,21 +324,21 @@ control_dispatch_imsg(int fd, short event, void *arg)
 	if (event & EV_READ) {
 		if (((n = imsg_read(&c->iev.ibuf)) == -1 && errno != EAGAIN) ||
 		    n == 0) {
-			control_close(fd, cs);
+			control_close(ps, &imsg, fd, cs);
 			return;
 		}
 	}
 
 	if (event & EV_WRITE) {
 		if (msgbuf_write(&c->iev.ibuf.w) <= 0 && errno != EAGAIN) {
-			control_close(fd, cs);
+			control_close(ps, &imsg, fd, cs);
 			return;
 		}
 	}
 
 	for (;;) {
 		if ((n = imsg_get(&c->iev.ibuf, &imsg)) == -1) {
-			control_close(fd, cs);
+			control_close(ps, &imsg, fd, cs);
 			return;
 		}
 
@@ -332,6 +346,9 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			break;
 
 		switch (imsg.hdr.type) {
+		case IMSG_SHOW_PACKETS_REQUEST:
+			show_ctl = 1;
+			show_fd = fd;
 		case IMSG_KILL_CLIENT:
 		case IMSG_GET_INFO_PARENT_REQUEST:
 		case IMSG_GET_INFO_THINGS_REQUEST:
@@ -381,6 +398,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			    &nci, sizeof(struct thingsd_control_info));
 			break;
 		case IMSG_KILL_CLIENT:
+		case IMSG_SHOW_PACKETS_REQUEST:
 		case IMSG_GET_INFO_PARENT_REQUEST:
 		case IMSG_GET_INFO_THINGS_REQUEST:
 		case IMSG_GET_INFO_CLIENTS_REQUEST:
@@ -396,7 +414,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			if (proc_compose_imsg(ps, PROC_PARENT, -1,
 			    imsg.hdr.type, imsg.hdr.peerid, -1,
 			    imsg.data, IMSG_DATA_SIZE(&imsg)) == -1) {
-				control_close(fd, cs);
+				control_close(ps, &imsg, fd, cs);
 				return;
 			}
 			break;
@@ -406,7 +424,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 		default:
 			log_debug("%s: error handling imsg %d",
 			    __func__, imsg.hdr.type);
-			control_close(fd, cs);
+			control_close(ps, &imsg, fd, cs);
 			break;
 		}
 		imsg_free(&imsg);
@@ -419,7 +437,7 @@ fail:
 	imsg_compose_event(&c->iev, IMSG_CTL_FAIL,
 	    0, 0, -1, &ret, sizeof(ret));
 	imsg_flush(&c->iev.ibuf);
-	control_close(fd, cs);
+	control_close(ps, &imsg, fd, cs);
 }
 
 void

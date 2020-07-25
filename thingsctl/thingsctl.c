@@ -69,7 +69,7 @@ main(int argc, char *argv[])
 	int			 done = 0;
 	int			 n, verbose = 0;
 	int			 ch, v = 0;
-	char			*sockname;
+	char			*sockname, *ctl_pkt = NULL;
 
 	sockname = THINGSD_SOCKET;
 	while ((ch = getopt(argc, argv, "s:")) != -1) {
@@ -158,8 +158,8 @@ main(int argc, char *argv[])
 		    0, -1, NULL, 0);
 		break;
 	case SHOW_PACKETS:
-		/* imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0, */
-		/*     0, -1, NULL, 0); */
+		imsg_compose(ibuf, IMSG_SHOW_PACKETS_REQUEST, 0,
+		    0, -1, res->name, sizeof(res->name));
 		break;
 	case SHOW_PARENT:
 		imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0,
@@ -214,6 +214,22 @@ main(int argc, char *argv[])
 				done = show_control_msg(&imsg);
 				break;
 			case SHOW_PACKETS:
+				if (imsg.hdr.type ==
+				    IMSG_SHOW_PACKETS_END_DATA) {
+					done = 1;
+					break;
+				}
+				if ((ctl_pkt = calloc(IMSG_DATA_SIZE(&imsg),
+				    sizeof(*ctl_pkt))) == NULL)
+					errx(1, "calloc ctl_pkt");
+				if ((ctl_pkt = strndup(imsg.data,
+				    IMSG_DATA_SIZE(&imsg))) == NULL) {
+					free(ctl_pkt);
+					break;
+				}
+				printf("%s\n", ctl_pkt);
+				free(ctl_pkt);
+				ctl_pkt = NULL;
 				break;
 			case SHOW_PARENT:
 				done = show_parent_msg(&imsg);
@@ -226,6 +242,7 @@ main(int argc, char *argv[])
 	}
 	printf("\n");
 	close(ctl_sock);
+	free(ctl_pkt);
 	free(ibuf);
 
 	return (0);
@@ -249,7 +266,6 @@ show_parent_msg(struct imsg *imsg)
 		printf(" (%d).\n", npi->verbose);
 		break;
 	case IMSG_GET_INFO_PARENT_END_DATA:
-	case IMSG_CTL_END:
 		return (1);
 	default:
 		break;
@@ -276,7 +292,6 @@ show_control_msg(struct imsg *imsg)
 		printf(" (%d).\n", nci->verbose);
 		break;
 	case IMSG_GET_INFO_CONTROL_END_DATA:
-	case IMSG_CTL_END:
 		return (1);
 	default:
 		break;
@@ -337,7 +352,6 @@ list_things_msg(struct imsg *imsg)
 
 		break;
 	case IMSG_GET_INFO_THINGS_END_DATA:
-	case IMSG_CTL_END:
 		return (1);
 	default:
 		break;
@@ -366,7 +380,6 @@ list_clients_msg(struct imsg *imsg)
 		printf("\tSubscriptions:\t\t%zu\n", nci->subs);
 		break;
 	case IMSG_GET_INFO_CLIENTS_END_DATA:
-	case IMSG_CTL_END:
 		return (1);
 	default:
 		break;
@@ -400,7 +413,6 @@ list_sockets_msg(struct imsg *imsg)
 			printf("\tMax Clients:\t\t%zu\n", nsi->max_clients);
 		break;
 	case IMSG_GET_INFO_SOCKETS_END_DATA:
-	case IMSG_CTL_END:
 		return (1);
 	default:
 		break;

@@ -174,7 +174,6 @@ things_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		config_getreset(thingsd_env, imsg);
 		break;
 	case IMSG_CTL_VERBOSE:
-			log_info("%s", __func__);
 		IMSG_SIZE_CHECK(imsg, &verbose);
 		memcpy(&verbose, imsg->data, sizeof(verbose));
 		log_setverbose(verbose);
@@ -286,9 +285,29 @@ things_shutdown(void)
 }
 
 void
+things_echo_pkt(struct privsep *ps, struct imsg *imsg)
+{
+	if (thingsd_env->thing_pkt.exists)
+		return;
+	thingsd_env->thing_pkt.ps = *ps;
+	thingsd_env->thing_pkt.imsg = *imsg;
+	memcpy(thingsd_env->thing_pkt.name, imsg->data,
+	    sizeof(thingsd_env->thing_pkt.name));
+	thingsd_env->thing_pkt.exists = true;
+}
+
+void
+things_stop_pkt(void)
+{
+	/* memset(thingsd_env->thing_pkt.name, 0, */
+	/*     sizeof(thingsd_env->thing_pkt.name)); */
+	thingsd_env->thing_pkt.exists = false;
+}
+
+void
 things_show_info(struct privsep *ps, struct imsg *imsg)
 {
-	char filter[THINGSD_MAXTHINGNAME];
+	char filter[THINGSD_MAXNAME];
 	struct thing *thing, nti;
 
 	switch (imsg->hdr.type) {
@@ -489,4 +508,13 @@ do_reconn(void)
 
 	if (thingsd_env->dcount == 0)
 		thingsd_env->exists = false;
+}
+
+void
+send_thing_pkt(struct privsep *ps, struct imsg *imsg, char *name, char *pkt,
+    int len)
+{
+	if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+	    IMSG_SHOW_PACKETS_DATA, imsg->hdr.peerid, -1, pkt, len) == -1)
+		return;
 }

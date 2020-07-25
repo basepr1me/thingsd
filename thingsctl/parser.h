@@ -34,7 +34,7 @@ enum actions {
 
 struct parse_result {
 	enum actions	action;
-	char		name[THINGSD_MAXTHINGNAME];
+	char		name[THINGSD_MAXNAME];
 };
 
 struct parse_result	*parse(int, char *[]);

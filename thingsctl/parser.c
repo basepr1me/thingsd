@@ -58,34 +58,36 @@ static const struct token t_client_name[];
 static const struct token t_kill_name[];
 static const struct token t_thing_name[];
 static const struct token t_socket_name[];
+static const struct token t_pkt_thing[];
 
 static const struct token t_main[] = {
-	{KEYWORD,	"reload",	RELOAD,		NULL},
-	{KEYWORD,	"list",		LIST,		t_list},
-	{KEYWORD,	"show",		SHOW,		t_show},
-	{KEYWORD,	"log",		NONE,		t_log},
+	{KEYWORD,	"echo",		SHOW_PACKETS,	t_pkt_thing},
 	{KEYWORD,	"kill",		NONE,		t_kill_name},
+	{KEYWORD,	"list",		LIST,		t_list},
+	{KEYWORD,	"log",		NONE,		t_log},
+	{KEYWORD,	"reload",	RELOAD,		NULL},
+	{KEYWORD,	"show",		SHOW,		t_show},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
 static const struct token t_log[] = {
+	{KEYWORD,	"brief",	LOG_BRIEF,	NULL},
 	{KEYWORD,	"debug",	LOG_DEBUG,	NULL},
 	{KEYWORD,	"verbose",	LOG_VERBOSE,	NULL},
-	{KEYWORD,	"brief",	LOG_BRIEF,	NULL},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
 static const struct token t_list[] = {
 	{KEYWORD,	"clients",	LIST_CLIENTS,	NULL},
-	{KEYWORD,	"things",	LIST_THINGS,	NULL},
 	{KEYWORD,	"sockets",	LIST_SOCKETS,	NULL},
+	{KEYWORD,	"things",	LIST_THINGS,	NULL},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
 static const struct token t_show[] = {
-	{KEYWORD,	"parent",	SHOW_PARENT,	NULL},
-	{KEYWORD,	"control",	SHOW_CONTROL,	NULL},
 	{KEYWORD,	"client",	NONE,		t_client_name},
+	{KEYWORD,	"control",	SHOW_CONTROL,	NULL},
+	{KEYWORD,	"parent",	SHOW_PARENT,	NULL},
 	{KEYWORD,	"socket",	NONE,		t_socket_name},
 	{KEYWORD,	"thing",	NONE,		t_thing_name},
 	{ENDTOKEN,	"",		NONE,		NULL}
@@ -108,6 +110,11 @@ static const struct token t_kill_name[] = {
 
 static const struct token t_socket_name[] = {
 	{SOCKETNAME,	"",		LIST_SOCKETS,	NULL},
+	{ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_pkt_thing[] = {
+	{THINGNAME,	"",		NONE,		NULL},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
