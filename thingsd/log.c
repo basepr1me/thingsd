@@ -22,23 +22,40 @@
 #include <errno.h>
 #include <time.h>
 
-#include <log.h>
+static int	 debug;
+static int	 verbose;
+const char	*log_procname;
 
-static int		 debug;
-static int		 verbose;
-const char		*log_procname;
+void	log_init(int, int);
+void	log_procinit(const char *);
+void	log_setverbose(int);
+int	log_getverbose(void);
+void	log_warn(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+void	log_warnx(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+void	log_info(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+void	log_debug(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+void	logit(int, const char *, ...)
+	    __attribute__((__format__ (printf, 2, 3)));
+void	vlog(int, const char *, va_list)
+	    __attribute__((__format__ (printf, 2, 0)));
+__dead void fatal(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+__dead void fatalx(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
 
 void
 log_init(int n_debug, int facility)
 {
-	extern char		*__progname;
-
 	debug = n_debug;
 	verbose = n_debug;
-	log_procinit(__progname);
+	log_procinit(getprogname());
 
 	if (!debug)
-		openlog(__progname, LOG_PID | LOG_NDELAY, facility);
+		openlog(getprogname(), LOG_PID | LOG_NDELAY, facility);
 
 	tzset();
 }
@@ -65,7 +82,7 @@ log_getverbose(void)
 void
 logit(int pri, const char *fmt, ...)
 {
-	va_list			 ap;
+	va_list	ap;
 
 	va_start(ap, fmt);
 	vlog(pri, fmt, ap);
@@ -75,8 +92,8 @@ logit(int pri, const char *fmt, ...)
 void
 vlog(int pri, const char *fmt, va_list ap)
 {
-	char			*nfmt;
-	int			 saved_errno = errno;
+	char	*nfmt;
+	int	 saved_errno = errno;
 
 	if (debug) {
 		/* best effort in out of mem situations */
@@ -97,23 +114,23 @@ vlog(int pri, const char *fmt, va_list ap)
 void
 log_warn(const char *emsg, ...)
 {
-	char			*nfmt;
-	va_list			 ap;
-	int			 saved_errno = errno;
+	char		*nfmt;
+	va_list		 ap;
+	int		 saved_errno = errno;
 
 	/* best effort to even work in out of memory situations */
 	if (emsg == NULL)
-		logit(LOG_ERR, "%s", strerror(saved_errno));
+		logit(LOG_CRIT, "%s", strerror(saved_errno));
 	else {
 		va_start(ap, emsg);
 
 		if (asprintf(&nfmt, "%s: %s", emsg,
 		    strerror(saved_errno)) == -1) {
 			/* we tried it... */
-			vlog(LOG_ERR, emsg, ap);
-			logit(LOG_ERR, "%s", strerror(saved_errno));
+			vlog(LOG_CRIT, emsg, ap);
+			logit(LOG_CRIT, "%s", strerror(saved_errno));
 		} else {
-			vlog(LOG_ERR, nfmt, ap);
+			vlog(LOG_CRIT, nfmt, ap);
 			free(nfmt);
 		}
 		va_end(ap);
@@ -125,17 +142,17 @@ log_warn(const char *emsg, ...)
 void
 log_warnx(const char *emsg, ...)
 {
-	va_list			 ap;
+	va_list	 ap;
 
 	va_start(ap, emsg);
-	vlog(LOG_ERR, emsg, ap);
+	vlog(LOG_CRIT, emsg, ap);
 	va_end(ap);
 }
 
 void
 log_info(const char *emsg, ...)
 {
-	va_list			 ap;
+	va_list	 ap;
 
 	va_start(ap, emsg);
 	vlog(LOG_INFO, emsg, ap);
@@ -145,11 +162,11 @@ log_info(const char *emsg, ...)
 void
 log_debug(const char *emsg, ...)
 {
-	va_list			 ap;
+	va_list	 ap;
 
 	if (verbose > 1) {
 		va_start(ap, emsg);
-		vlog(LOG_INFO, emsg, ap);
+		vlog(LOG_DEBUG, emsg, ap);
 		va_end(ap);
 	}
 }
@@ -157,8 +174,8 @@ log_debug(const char *emsg, ...)
 static void
 vfatalc(int code, const char *emsg, va_list ap)
 {
-	static char		 s[BUFSIZ];
-	const char		*sep;
+	static char	s[BUFSIZ];
+	const char	*sep;
 
 	if (emsg != NULL) {
 		(void)vsnprintf(s, sizeof(s), emsg, ap);
@@ -177,7 +194,7 @@ vfatalc(int code, const char *emsg, va_list ap)
 void
 fatal(const char *emsg, ...)
 {
-	va_list			 ap;
+	va_list	ap;
 
 	va_start(ap, emsg);
 	vfatalc(errno, emsg, ap);
@@ -188,7 +205,7 @@ fatal(const char *emsg, ...)
 void
 fatalx(const char *emsg, ...)
 {
-	va_list			 ap;
+	va_list	ap;
 
 	va_start(ap, emsg);
 	vfatalc(0, emsg, ap);

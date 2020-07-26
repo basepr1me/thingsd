@@ -2,9 +2,9 @@ PROG=		thingsctl
 
 SRCS+=		thingsctl.c parser.c
 
-INC_C_DIR=	/usr/local
-BINDIR?=	${INC_C_DIR}/sbin
-MANDIR?=	${INC_C_DIR}/man/man
+PREFIX=		/usr/local
+BINDIR?=	${PREFIX}/sbin
+MANDIR?=	${PREFIX}/man/man
 
 LDADD=		-lutil
 CFLAGS+=	-Wall -I${.CURDIR}

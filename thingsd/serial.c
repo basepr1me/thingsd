@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019, 2020 Tracey Emery <tracey@traceyemery.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -21,53 +21,63 @@
 
 #include <event.h>
 #include <fcntl.h>
+#include <imsg.h>
 #include <stdbool.h>
 #include <string.h>
 #include <termios.h>
 
+#include "proc.h"
 #include "thingsd.h"
 
-extern struct dthgs	*pdthgs;
-
 void
-open_thgs(struct thgsd *pthgsd, bool reconn)
+open_things(struct thingsd *env, bool reconn)
 {
-	struct thg		*thg;
-	struct dthg		*dthg;
+	struct thing		*thing;
+	struct dead_thing	*dead_thing;
 	struct termios		 s_opts;
 	int			 fd;
 	int			 baudrate = 0, stop = 0;
-	evbuffercb		 sockrd = sock_rd;
-	evbuffercb		 sockwr = sock_wr;
+	evbuffercb		 socketrd = socket_rd;
+	evbuffercb		 socketwr = socket_wr;
 
-	TAILQ_FOREACH(thg, &pthgsd->thgs, entry) {
-		if (thg->exists)
+	TAILQ_FOREACH(thing, env->things, entry) {
+		if (thing->exists)
 			continue;
-		if (thg->location != NULL) {
-			thg->type = DEV;
+
+		if (strlen(thing->location) != 0) {
+			thing->type = DEV;
+
 			/*
 			 * Just a reminder to set the ownership of your serial
 			 * devices to _thingsd. Otherwise, a thing will not be
 			 * able to successfully open(2) the file descriptor.
 			 */
-			fd = open(thg->location, O_RDWR | O_NONBLOCK | O_NOCTTY
-			    | O_NDELAY);
+			fd = open(thing->location, O_RDWR | O_NONBLOCK |
+			    O_NOCTTY | O_NDELAY);
+
 			if (fd == -1) {
-				log_warnx("failed to open %s", thg->location);
+				log_warnx("failed to open %s", thing->location);
+
 				if (reconn)
 					return;
-				dthg = new_dthg(thg);
-				pthgsd->exists = true;
-				pthgsd->dcount++;
-				thg->fd = -1;
-				thg->exists = false;
-				TAILQ_INSERT_TAIL(&pdthgs->zthgs, dthg, entry);
+
+				dead_thing = new_dead_thing(thing);
+
+				env->exists = true;
+				env->dcount++;
+				thing->fd = -1;
+				thing->exists = false;
+
+				TAILQ_INSERT_TAIL(env->dead_things->
+				    dead_things_list, dead_thing, entry);
+
 				return;
 			} else {
 				/* load current s_opts */
 				tcgetattr(fd, &s_opts);
+
 				/* set baud */
-				switch (thg->baud) {
+				switch (thing->baud) {
 				case 50:
 					baudrate = B50;
 					break;
@@ -123,14 +133,17 @@ open_thgs(struct thgsd *pthgsd, bool reconn)
 					baudrate = B115200;
 					break;
 				}
+
 				cfsetispeed(&s_opts, baudrate);
 				cfsetospeed(&s_opts, baudrate);
+
 				/* enable and set local */
 				s_opts.c_cflag |= (CLOCAL | CREAD);
+
 				/* set data bits */
-				if (thg->data_bits != -1) {
+				if (thing->data_bits != -1) {
 					s_opts.c_cflag &= ~CSIZE;
-					switch(thg->data_bits) {
+					switch(thing->data_bits) {
 					case 5:
 						stop = CS5;
 						break;
@@ -146,71 +159,89 @@ open_thgs(struct thgsd *pthgsd, bool reconn)
 					}
 					s_opts.c_cflag |= stop;
 				}
+
 				/* set parity */
-				if (thg->parity != NULL) {
+				if (strlen(thing->parity) != 0) {
 					s_opts.c_cflag &= ~PARENB;
+
 					/* enable parity checking */
-					if (strcmp(thg->parity, "odd") == 0) {
+					if (strcmp(thing->parity, "odd") == 0) {
 						s_opts.c_cflag |= PARENB;
 						s_opts.c_cflag |= PARODD;
 						s_opts.c_iflag |= (INPCK |
 						    ISTRIP);
-					} else if (strcmp(thg->parity,
+					} else if (strcmp(thing->parity,
 					    "even") == 0) {
 						s_opts.c_cflag |= PARENB;
 						s_opts.c_cflag &= ~PARODD;
 						s_opts.c_iflag |= (INPCK |
 						    ISTRIP);
 					}
+
 				}
+
 				/* set stop bits */
-				if (thg->stop_bits != -1) {
-					if (thg->stop_bits == 2)
+				if (thing->stop_bits != -1) {
+					if (thing->stop_bits == 2)
 						s_opts.c_cflag |= CSTOPB;
 					else
 						s_opts.c_cflag &= ~CSTOPB;
 				}
+
 				/* set hardware control */
-				if (thg->hw_ctl == false) {
+				if (thing->hw_ctl == false) {
 					s_opts.c_cflag &= ~CRTSCTS;
 				} else {
 					s_opts.c_cflag |= CRTSCTS;
 				}
+
 				/* set software control */
-				if (thg->sw_ctl == false) {
+				if (thing->sw_ctl == false) {
 					s_opts.c_iflag &= ~(IXON | IXOFF |
 					    IXANY);
 				} else {
 					s_opts.c_iflag |= (IXON | IXOFF |
 					    IXANY);
 				}
+
 				/* set input/output as raw */
 				s_opts.c_lflag &= ~(ICANON | ECHO | ECHOE |
 				    ISIG);
+
 				s_opts.c_oflag &= ~OPOST;
+
 				/* Set the new options for the port */
 				tcsetattr(fd, TCSANOW, &s_opts);
-				if ((thg->fd = fd) == '\0') {
+
+				if ((thing->fd = fd) == '\0') {
 					log_warnx("serial device not opened");
 					if (reconn)
 						return;
-					thg->exists = false;
-					add_reconn(thg);
+					thing->exists = false;
+					add_reconn(thing);
 					return;
 				}
-				thg->bev = bufferevent_new(thg->fd, sockrd,
-				    sockwr, sock_err, pthgsd);
-				if (thg->bev == NULL)
+
+				thing->bev = bufferevent_new(thing->fd,
+				    socketrd, socketwr, socket_err, env);
+
+				if (thing->bev == NULL)
 					fatalx("ipaddr bev error");
-				thg->evb = evbuffer_new();
-				if (thg->evb == NULL)
+
+				thing->evb = evbuffer_new();
+
+				if (thing->evb == NULL)
 					fatalx("ipaddr evb error");
-				bufferevent_enable(thg->bev, EV_READ|EV_WRITE);
+
+				bufferevent_enable(thing->bev, EV_READ |
+				    EV_WRITE);
 			}
+
 			if (reconn) {
-				thg->exists = true;
-				log_info("reconnected: %s", thg->name);
+				thing->exists = true;
+				log_info("reconnected: %s", thing->name);
 			}
+
 		}
 	}
 }

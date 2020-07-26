@@ -20,25 +20,27 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <net/if.h>
 #include <err.h>
 #include <errno.h>
 #include <event.h>
 #include <imsg.h>
 #include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "proc.h"
 #include "thingsd.h"
 #include "parser.h"
 
 enum token_type {
 	NOTOKEN,
 	ENDTOKEN,
-	KEYWORD,
-	CLTNAME,
-	THGNAME,
+	CLIENTNAME,
+	SOCKETNAME,
+	THINGNAME,
+	KEYWORD
 };
 
 struct token {
@@ -48,42 +50,72 @@ struct token {
 	const struct token	*next;
 };
 
-static const struct token t_main[];
-static const struct token t_log[];
 static const struct token t_list[];
-static const struct token t_ctl_name[];
-static const struct token t_thg_name[];
+static const struct token t_log[];
+static const struct token t_main[];
+static const struct token t_show[];
+static const struct token t_client_name[];
+static const struct token t_kill_name[];
+static const struct token t_thing_name[];
+static const struct token t_socket_name[];
+static const struct token t_pkt_thing[];
 
 static const struct token t_main[] = {
-	{KEYWORD,	"list",		NONE,		t_list},
+	{KEYWORD,	"echo",		SHOW_PACKETS,	t_pkt_thing},
+	{KEYWORD,	"kill",		NONE,		t_kill_name},
+	{KEYWORD,	"list",		LIST,		t_list},
 	{KEYWORD,	"log",		NONE,		t_log},
-	{KEYWORD,	"kill",		KILL_CLT,	t_ctl_name},
-	{KEYWORD,	"show",		SHOW_PKTS,	t_thg_name},
+	{KEYWORD,	"reload",	RELOAD,		NULL},
+	{KEYWORD,	"show",		SHOW,		t_show},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
 static const struct token t_log[] = {
+	{KEYWORD,	"brief",	LOG_BRIEF,	NULL},
 	{KEYWORD,	"debug",	LOG_DEBUG,	NULL},
 	{KEYWORD,	"verbose",	LOG_VERBOSE,	NULL},
-	{KEYWORD,	"brief",	LOG_BRIEF,	NULL},
 	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
 static const struct token t_list[] = {
-	{KEYWORD,	"clients",	LIST_CLTS,		NULL},
-	{KEYWORD,	"things",	LIST_THGS,		NULL},
-	{KEYWORD,	"sockets",	LIST_SOCKS,		NULL},
-	{ENDTOKEN,	"",		NONE,			NULL}
+	{KEYWORD,	"clients",	LIST_CLIENTS,	NULL},
+	{KEYWORD,	"sockets",	LIST_SOCKETS,	NULL},
+	{KEYWORD,	"things",	LIST_THINGS,	NULL},
+	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
-static const struct token t_ctl_name[] = {
-	{CLTNAME,	"",		NONE,			NULL},
-	{ENDTOKEN,	"",		NONE,			NULL}
+static const struct token t_show[] = {
+	{KEYWORD,	"client",	NONE,		t_client_name},
+	{KEYWORD,	"control",	SHOW_CONTROL,	NULL},
+	{KEYWORD,	"parent",	SHOW_PARENT,	NULL},
+	{KEYWORD,	"socket",	NONE,		t_socket_name},
+	{KEYWORD,	"thing",	NONE,		t_thing_name},
+	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
-static const struct token t_thg_name[] = {
-	{THGNAME,	"",		NONE,			NULL},
-	{ENDTOKEN,	"",		NONE,			NULL}
+static const struct token t_thing_name[] = {
+	{THINGNAME,	"",		LIST_THINGS,	NULL},
+	{ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_client_name[] = {
+	{CLIENTNAME,	"",		LIST_CLIENTS,	NULL},
+	{ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_kill_name[] = {
+	{CLIENTNAME,	"",		KILL_CLIENT,	NULL},
+	{ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_socket_name[] = {
+	{SOCKETNAME,	"",		LIST_SOCKETS,	NULL},
+	{ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_pkt_thing[] = {
+	{THINGNAME,	"",		NONE,		NULL},
+	{ENDTOKEN,	"",		NONE,		NULL}
 };
 
 static const struct token *match_token(const char *, const struct token *,
@@ -127,6 +159,7 @@ static const struct token *
 match_token(const char *word, const struct token *table,
     struct parse_result *res)
 {
+	size_t			 n;
 	u_int			 i, match;
 	const struct token	*t = NULL;
 
@@ -140,6 +173,22 @@ match_token(const char *word, const struct token *table,
 				t = &table[i];
 			}
 			break;
+		case THINGNAME:
+		case CLIENTNAME:
+		case SOCKETNAME:
+			if (!match && word != NULL && strlen(word) > 0) {
+				memset(res->name, 0,
+				    sizeof(res->name));
+				n = strlcpy(res->name, word,
+				    sizeof(res->name));
+				if (n >= sizeof(res->name))
+					err(1, "name too long");
+				match++;
+				t = &table[i];
+				if (t->value)
+					res->action = t->value;
+			}
+			break;
 		case KEYWORD:
 			if (word != NULL && strncmp(word, table[i].keyword,
 			    strlen(word)) == 0) {
@@ -147,20 +196,6 @@ match_token(const char *word, const struct token *table,
 				t = &table[i];
 				if (t->value)
 					res->action = t->value;
-			}
-			break;
-		case CLTNAME:
-			if (!match && word != NULL && strlen(word) > 0) {
-				res->clt_name = strdup(word);
-				match++;
-				t = &table[i];
-			}
-			break;
-		case THGNAME:
-			if (!match && word != NULL && strlen(word) > 0) {
-				res->thg_name = strdup(word);
-				match++;
-				t = &table[i];
 			}
 			break;
 		case ENDTOKEN:
@@ -191,14 +226,17 @@ show_valid_args(const struct token *table)
 		case NOTOKEN:
 			fprintf(stderr, "  <cr>\n");
 			break;
+		case THINGNAME:
+			fprintf(stderr, " <thing_name>\n");
+			break;
+		case SOCKETNAME:
+			fprintf(stderr, " <socket_name>\n");
+			break;
+		case CLIENTNAME:
+			fprintf(stderr, " <client_name>\n");
+			break;
 		case KEYWORD:
 			fprintf(stderr, "  %s\n", table[i].keyword);
-			break;
-		case CLTNAME:
-			fprintf(stderr, " <client name>\n");
-			break;
-		case THGNAME:
-			fprintf(stderr, " <thing name>\n");
 			break;
 		case ENDTOKEN:
 			break;

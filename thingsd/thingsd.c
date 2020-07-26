@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2016, 2019 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019, 2020 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2015 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,102 +15,244 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 #include <sys/wait.h>
+#include <sys/cdefs.h>
 
+#include <net/if.h>
+#include <netinet/in.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <termios.h>
 #include <err.h>
 #include <errno.h>
 #include <event.h>
 #include <fcntl.h>
-#include <pthread.h>
+#include <imsg.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdbool.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <ctype.h>
+#include <util.h>
 
+#include "proc.h"
 #include "thingsd.h"
-#include "control.h"
 
-__dead void		 usage(void);
-int			 main(int, char *[]);
-void			 thgsd_sighdlr(int, short, void *);
-void			 thgsd_shutdown(void);
-static pid_t		 start_child(int, char *, int, int, int);
-static void		 main_dispatch_thgs(int, short, void *);
+__dead void usage(void);
 
-bool			 thgs_chld = false;
-struct event		 evsigquit;
-struct event		 evsigterm;
-struct event		 evsigint;
-struct event		 evsighup;
+int	 main(int, char **);
+int	 thingsd_configure(struct privsep *);
+void	 thingsd_sighdlr(int sig, short event, void *arg);
+void	 thingsd_shutdown(void);
+int	 thingsd_control_run(void);
+int	 thingsd_dispatch_control(int, struct privsep_proc *, struct imsg *);
+int	 thingsd_dispatch_things(int, struct privsep_proc *, struct imsg *);
+void	 thingsd_configure_things(struct privsep *);
 
-pid_t			 thgs_pid;
-static struct imsgev	*iev_thgs;
+void	 thingsd_show_info(struct privsep *, struct imsg *);
 
-uint32_t	 v_opts;
+struct thingsd	*thingsd_env;
 
-__dead void
-usage(void)
+static struct privsep_proc procs[] = {
+	{ "control",	PROC_CONTROL,	thingsd_dispatch_control, control },
+	{ "things",	PROC_THINGS,	thingsd_dispatch_things, things,
+		things_shutdown },
+};
+
+/* For the privileged process */
+static struct privsep_proc *proc_priv = &procs[0];
+static struct passwd proc_privpw;
+
+int
+thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
-	fprintf(stderr, "usage: %s [-dv]\n", getprogname());
-	exit(1);
+	struct privsep	*ps = p->p_ps;
+	int		 res = 0, cmd = 0, verbose;
+	unsigned int	 v = 0;
+	char		 client_name[THINGSD_MAXNAME];
+	struct client	*client;
+
+	switch (imsg->hdr.type) {
+	case IMSG_SHOW_PACKETS_END_DATA:
+		IMSG_SIZE_CHECK(imsg, &v);
+		if (imsg->data == NULL)
+			break;
+		things_stop_pkt(ps, imsg);
+		break;
+	case IMSG_SHOW_PACKETS_REQUEST:
+		IMSG_SIZE_CHECK(imsg, &v);
+		if (imsg->data == NULL)
+			break;
+		things_echo_pkt(ps, imsg);
+		break;
+	case IMSG_KILL_CLIENT:
+		IMSG_SIZE_CHECK(imsg, &v);
+		if (imsg->data == NULL)
+			break;
+		memcpy(client_name, imsg->data, sizeof(client_name));
+		TAILQ_FOREACH(client, thingsd_env->clients, entry) {
+			if (strcmp(client->name, client_name) == 0) {
+				log_debug("Control killed client: %s",
+				    client_name);
+				client_del(thingsd_env, client);
+				break;
+			}
+		}
+		break;
+	case IMSG_GET_INFO_CLIENTS_REQUEST:
+		clients_show_info(ps, imsg);
+		break;
+	case IMSG_GET_INFO_SOCKETS_REQUEST:
+		sockets_show_info(ps, imsg);
+		break;
+	case IMSG_GET_INFO_THINGS_REQUEST:
+	case IMSG_GET_INFO_THINGS_REQUEST_ROOT:
+		things_show_info(ps, imsg);
+		break;
+	case IMSG_GET_INFO_PARENT_REQUEST:
+		thingsd_show_info(ps, imsg);
+		break;
+	case IMSG_CTL_RESET:
+		IMSG_SIZE_CHECK(imsg, &v);
+		memcpy(&v, imsg->data, sizeof(v));
+		thingsd_reload(v);
+		break;
+	case IMSG_CTL_VERBOSE:
+		IMSG_SIZE_CHECK(imsg, &verbose);
+		memcpy(&verbose, imsg->data, sizeof(verbose));
+		log_setverbose(verbose);
+
+		proc_forward_imsg(ps, imsg, PROC_THINGS, -1);
+		break;
+	default:
+		return (-1);
+	}
+
+	switch (cmd) {
+	case 0:
+		break;
+	default:
+		if (proc_compose_imsg(ps, PROC_CONTROL, -1, cmd,
+		    imsg->hdr.peerid, -1, &res, sizeof(res)) == -1)
+			return (-1);
+		break;
+	}
+
+	return (0);
+}
+
+int
+thingsd_dispatch_things(int fd, struct privsep_proc *p, struct imsg *imsg)
+{
+	struct privsep		*ps = p->p_ps;
+
+	switch (imsg->hdr.type) {
+	case IMSG_ADD_THING:
+		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
+		break;
+	default:
+		return (-1);
+	}
+
+	return (0);
 }
 
 void
-thgsd_sighdlr(int sig, short event, void *arg)
+thingsd_sighdlr(int sig, short event, void *arg)
 {
+	if (privsep_process != PROC_PARENT)
+		return;
+
 	switch (sig) {
-	case SIGQUIT:
-	case SIGTERM:
-	case SIGINT:
 	case SIGHUP:
-		thgsd_shutdown();
+		log_info("%s: reload requested with SIGHUP", __func__);
+
+		/*
+		 * This is safe because libevent uses async signal handlers
+		 * that run in the event loop and not in signal context.
+		 */
+		thingsd_reload(0);
 		break;
 	case SIGPIPE:
-		/* ignore */
+		log_info("%s: ignoring SIGPIPE", __func__);
+		break;
+	case SIGUSR1:
+		log_info("%s: ignoring SIGUSR1", __func__);
+		break;
+	case SIGTERM:
+	case SIGINT:
+		thingsd_shutdown();
 		break;
 	default:
 		fatalx("unexpected signal");
 	}
 }
 
-int
-main(int argc, char *argv[])
+__dead void
+usage(void)
 {
-	int			 ch;
-	char			*thgs_sock, *saved_argv0;
-	int			 pipe_thgs[2], debug = 0;
-	int			 control_fd;
+	fprintf(stderr, "usage: %s [-dnv] [-D macro=value] [-f file]\n",
+	    getprogname());
+	exit(1);
+}
 
-	thgs_sock = THINGSD_SOCK;
+int
+main(int argc, char **argv)
+{
+	struct thingsd		*env;
+	struct privsep		*ps;
+	struct timeval		 eb_timeout;
+	int			 ch;
+	const char		*conffile = THINGSD_CONF;
+	enum privsep_procid	 proc_id = PROC_PARENT;
+	int			 proc_instance = 0;
+	const char		*errp, *title = NULL;
+	int			 argc0 = argc;
 
 	/* log to stderr until daemonized */
 	log_init(1, LOG_DAEMON);
-	log_setverbose(1);
 
-	saved_argv0 = argv[0];
+	if ((env = calloc(1, sizeof(*env))) == NULL)
+		fatal("calloc: env");
 
-	if (saved_argv0 == NULL)
-		saved_argv0 = "thingsd";
+	thingsd_env = env;
 
-	while ((ch = getopt(argc, argv, "dvC")) != -1) {
+	while ((ch = getopt(argc, argv, "D:P:I:df:vn")) != -1) {
 		switch (ch) {
-		case 'C':
-			thgs_chld = true;
+		case 'D':
+			if (cmdline_symset(optarg) < 0)
+				log_warnx("could not parse macro definition %s",
+				    optarg);
 			break;
 		case 'd':
-			debug = 1;
+			env->thingsd_debug = 2;
+			break;
+		case 'f':
+			conffile = optarg;
 			break;
 		case 'v':
-			if (v_opts & L_VERBOSE1)
-				v_opts |= L_VERBOSE2;
-			v_opts |= L_VERBOSE1;
+			env->thingsd_verbose++;
+			break;
+		case 'n':
+			env->thingsd_noaction = 1;
+			break;
+		case 'P':
+			title = optarg;
+			proc_id = proc_getid(procs, nitems(procs), title);
+			if (proc_id == PROC_MAX)
+				fatalx("invalid process name");
+			break;
+		case 'I':
+			proc_instance = strtonum(optarg, 0,
+			    PROC_MAX_INSTANCES, &errp);
+			if (errp)
+				fatalx("invalid process instance");
 			break;
 		default:
 			usage();
@@ -117,224 +260,271 @@ main(int argc, char *argv[])
 	}
 
 	argc -= optind;
-
 	if (argc > 0)
 		usage();
-	if (thgs_chld)
-		thgs_main(debug, v_opts & (L_VERBOSE1 | L_VERBOSE2), thgs_sock);
-	if (geteuid())
-		fatalx("need root privileges");
-	if ((control_fd = control_init(thgs_sock)) == -1)
-		fatalx("thgs_sock failed");
 
-	control_state.fd = control_fd;
+	if (env->thingsd_noaction && !env->thingsd_debug)
+		env->thingsd_debug = 1;
 
-	log_init(debug, LOG_DAEMON);
-	log_setverbose(v_opts & L_VERBOSE1);
+	/* check for root privileges */
+	if (env->thingsd_noaction == 0) {
+		if (geteuid())
+			fatalx("need root privileges");
+	}
 
-	/* make parent daemon */
-	thgsd_process = PROC_MAIN;
-	log_procinit(log_procnames[thgsd_process]);
+	ps = &env->thingsd_ps;
+	ps->ps_env = env;
 
-	if (!debug && daemon(1, 0) == -1)
-		fatalx("daemon");
+	if (config_init(env) == -1)
+		fatal("failed to initialize configuration");
 
-	log_info("%s started", getprogname());
+	if ((ps->ps_pw = getpwnam(THINGSD_USER)) == NULL)
+		fatal("unknown user %s", THINGSD_USER);
 
-	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK,
-	    PF_UNSPEC, pipe_thgs) == -1)
-		fatalx("thgs socketpair");
+	env->thingsd_conffile = conffile;
 
-	thgs_pid = start_child(PROC_THGS, saved_argv0, pipe_thgs[1], debug,
-	    v_opts & (L_VERBOSE1 | L_VERBOSE2));
+	if (parse_config(env->thingsd_conffile) == -1)
+		exit(1);
 
-	event_init();
+	/* First proc runs as root without pledge but in default chroot */
+	proc_priv->p_pw = &proc_privpw; /* initialized to all 0 */
+	proc_priv->p_chroot = ps->ps_pw->pw_dir; /* from THINGSD_USER */
 
-	signal_set(&evsigquit, SIGQUIT, thgsd_sighdlr, NULL);
-	signal_set(&evsigterm, SIGTERM, thgsd_sighdlr, NULL);
-	signal_set(&evsigint, SIGINT, thgsd_sighdlr, NULL);
-	signal_set(&evsighup, SIGHUP, thgsd_sighdlr, NULL);
+	/* Configure the control socket */
+	ps->ps_csock.cs_name = THINGSD_SOCKET;
+	TAILQ_INIT(&ps->ps_rcsocks);
 
-	signal_add(&evsigquit, NULL);
-	signal_add(&evsigterm, NULL);
-	signal_add(&evsigint, NULL);
-	signal_add(&evsighup, NULL);
-	signal(SIGPIPE, SIG_IGN);
+	log_init(env->thingsd_debug, LOG_DAEMON);
+	log_setverbose(env->thingsd_verbose);
 
-	/* setup thgs child pipe */
-	if ((iev_thgs = malloc(sizeof(struct imsgev))) == NULL)
-		fatalx("iev_thgs malloc");
+	if (env->thingsd_noaction)
+		ps->ps_noaction = 1;
 
-	imsg_init(&iev_thgs->ibuf, pipe_thgs[0]);
-	iev_thgs->handler = main_dispatch_thgs;
+	ps->ps_instances[PROC_THINGS] = env->prefork_things;
+	ps->ps_instance = proc_instance;
+	if (title != NULL)
+		ps->ps_title[proc_id] = title;
 
-	/* setup event handler */
-	iev_thgs->events = EV_READ;
-	event_set(&iev_thgs->ev, pipe_thgs[0], iev_thgs->events,
-	    iev_thgs->handler, iev_thgs);
-	event_add(&iev_thgs->ev, NULL);
+	/* only the parent returns */
+	proc_init(ps, procs, nitems(procs), argc0, argv, proc_id);
 
-	if (getpwnam(TH_USER) == NULL)
-		log_info("running as root. %s user not found", TH_USER);
-	if (pledge("stdio unix recvfd", NULL) == -1)
-		fatal("pledge");
+	log_procinit("parent");
+	if (!env->thingsd_debug && daemon(0, 0) == -1)
+		fatal("can't daemonize");
 
-	TAILQ_INIT(&ctl_conns);
-	control_listen();
+	if (ps->ps_noaction == 0)
+		log_info("%s startup", getprogname());
 
-	event_dispatch();
+	env->things_eb = event_init();
 
-	thgsd_shutdown();
-	return EXIT_SUCCESS;
+	signal_set(&ps->ps_evsigint, SIGINT, thingsd_sighdlr, ps);
+	signal_set(&ps->ps_evsigterm, SIGTERM, thingsd_sighdlr, ps);
+	signal_set(&ps->ps_evsighup, SIGHUP, thingsd_sighdlr, ps);
+	signal_set(&ps->ps_evsigpipe, SIGPIPE, thingsd_sighdlr, ps);
+	signal_set(&ps->ps_evsigusr1, SIGUSR1, thingsd_sighdlr, ps);
+
+	signal_add(&ps->ps_evsigint, NULL);
+	signal_add(&ps->ps_evsigterm, NULL);
+	signal_add(&ps->ps_evsighup, NULL);
+	signal_add(&ps->ps_evsigpipe, NULL);
+	signal_add(&ps->ps_evsigusr1, NULL);
+
+	if (!env->thingsd_noaction)
+		proc_connect(ps);
+
+	if (thingsd_configure(ps) == -1)
+		fatalx("configuration failed");
+
+	/* begin thing watchdog */
+	eb_timeout.tv_sec = EB_TIMEOUT;
+	eb_timeout.tv_usec = 0;
+
+	while (env->dead_things->run) {
+		if (env->exists) {
+			do_reconn();
+		}
+		event_base_loopexit(env->things_eb, &eb_timeout);
+		event_base_dispatch(env->things_eb);
+	}
+
+	log_debug("%s parent exiting", getprogname());
+
+	return (0);
+}
+
+int
+thingsd_configure(struct privsep *ps)
+{
+	if (unveil(THINGSD_CONF, "r") == -1)
+		err(1, "unveil");
+	if (unveil("/dev", "rw") == -1)
+		err(1, "unveil");
+	if (unveil(NULL, NULL) != 0)
+		err(1, "unveil");
+
+	if (pledge("stdio rpath wpath inet proc tty dns", NULL) == -1)
+		err(1, "pledge");
+
+	if (parse_config(thingsd_env->thingsd_conffile) == -1) {
+		proc_kill(&thingsd_env->thingsd_ps);
+		exit(1);
+	}
+
+	if (thingsd_env->thingsd_noaction) {
+		fprintf(stderr, "configuration OK\n");
+		proc_kill(&thingsd_env->thingsd_ps);
+		exit(0);
+	}
+
+	thingsd_configure_things(ps);
+
+	return (0);
 }
 
 void
-thgsd_shutdown()
+thingsd_reload(int reset)
 {
-	pid_t		 pid;
-	int		 status;
+	const char *filename = thingsd_env->thingsd_conffile;
 
-	/* close pipe */
-	msgbuf_write(&iev_thgs->ibuf.w);
-	msgbuf_clear(&iev_thgs->ibuf.w);
-	close(iev_thgs->ibuf.fd);
-	free(iev_thgs);
-	log_debug("waiting for children to terminate");
-	do {
-		pid = wait(&status);
-		if (pid == -1) {
-			if (errno != EINTR && errno != ECHILD)
-				fatal("wait");
-		} else if (WIFSIGNALED(status))
-			log_warnx("%s terminated; signal %d", "things",
-			    WTERMSIG(status));
-	} while (pid != -1 || (pid == -1 && errno == EINTR));
-	log_info("%s terminated", getprogname());
+	log_warnx("%s: reload config file %s", __func__, filename);
+
+	things_reset();
+
+	/* Purge the existing configuration. */
+	config_purge(thingsd_env, reset);
+	config_setreset(thingsd_env, reset);
+
+	if (parse_config(thingsd_env->thingsd_conffile) == -1) {
+		log_warnx("%s: failed to reload config file %s",
+		    __func__, filename);
+	}
+
+	thingsd_configure_things(&thingsd_env->thingsd_ps);
+}
+
+void
+thingsd_shutdown(void)
+{
+	proc_kill(&thingsd_env->thingsd_ps);
+	free(thingsd_env);
+
+	log_warnx("parent terminating");
 	exit(0);
 }
 
-static pid_t
-start_child(int p, char *argv0, int fd, int debug, int verbose)
+void
+thingsd_show_info(struct privsep *ps, struct imsg *imsg)
 {
-	int			 argc = 0, argvc = 10;
-	char			*argv[argvc];
-	pid_t			 pid;
+	struct thingsd_parent_info	npi;
 
-	switch (pid = fork()) {
-	case -1:
-		fatal("cannot fork");
-	case 0:
+	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_PARENT_REQUEST:
+		npi.verbose = log_getverbose();
+		if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+		    IMSG_GET_INFO_PARENT_DATA, imsg->hdr.peerid,
+		    -1, &npi, sizeof(npi)) == -1)
+			return;
+		if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+		    IMSG_GET_INFO_PARENT_END_DATA, imsg->hdr.peerid,
+		    -1, &npi, sizeof(npi)) == -1)
+			return;
 		break;
 	default:
-		close(fd);
-		return (pid);
-	}
-
-	if (fd != PARENT_SOCK_FD) {
-		if (dup2(fd, PARENT_SOCK_FD) == -1)
-			fatal("cannot setup imsg fd");
-	} else if (fcntl(fd, F_SETFD, 0) == -1)
-		fatal("cannot setup imsg fd");
-
-	argv[argc++] = argv0;
-	switch (p) {
-	case PROC_MAIN:
-		fatalx("Can not start main process");
-	case PROC_THGS:
-		argv[argc++] = "-C";
+		log_debug("%s: error handling imsg", __func__);
 		break;
 	}
-	if (debug)
-		argv[argc++] = "-d";
-	if (verbose & L_VERBOSE1)
-		argv[argc++] = "-v";
-	if (verbose & L_VERBOSE2)
-		argv[argc++] = "-v";
-	argv[argc++] = NULL;
-
-	execvp(argv0, argv);
-	fatal("execvp");
 }
 
 void
-imsg_event_add(struct imsgev *iev)
+thingsd_configure_things(struct privsep *ps)
 {
-	iev->events = EV_READ;
-	if (iev->ibuf.w.queued)
-		iev->events |= EV_WRITE;
+	struct thing	*thing, nti;
+	size_t		 n;
 
-	event_del(&iev->ev);
-	event_set(&iev->ev, iev->ibuf.fd, iev->events, iev->handler, iev);
-	event_add(&iev->ev, NULL);
-}
+	open_things(thingsd_env, false);
+	create_sockets(thingsd_env, false);
 
-int
-imsg_compose_event(struct imsgev *iev, uint16_t type, uint32_t peerid,
-    pid_t pid, int fd, void *data, uint16_t datalen)
-{
-	int			ret;
+	start_client_chk(thingsd_env);
 
-	if ((ret = imsg_compose(&iev->ibuf, type, peerid,
-	    pid, fd, data, datalen)) != -1)
-		imsg_event_add(iev);
-	return (ret);
-}
+	/* Send configured things to things. */
+	TAILQ_FOREACH(thing, thingsd_env->things, entry) {
+		memset(&nti, 0, sizeof(nti));
 
-static void
-main_dispatch_thgs(int fd, short event, void *bula)
-{
-	struct imsgev		*iev = bula;
-	struct imsgbuf		*ibuf = &iev->ibuf;
-	struct imsg		 imsg;
-	ssize_t			 n;
-	int			 shut = 0;
+		nti.exists = thing->exists;
+		nti.hw_ctl = thing->hw_ctl;
+		nti.persist = thing->persist;
 
-	if (event & EV_READ) {
-		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
-			fatal("imsg_read error");
-		if (n == 0)	/* connection closed */
-			shut = 1;
+		n = strlcpy(nti.iface, thing->iface, sizeof(nti.iface));
+		if (n >= sizeof(nti.iface))
+			fatalx("%s: nti.iface too long", __func__);
+
+		n = strlcpy(nti.ipaddr, thing->ipaddr, sizeof(nti.ipaddr));
+		if (n >= sizeof(nti.ipaddr))
+			fatalx("%s: nti.ipaddr too long", __func__);
+
+		n = strlcpy(nti.parity, thing->parity, sizeof(nti.parity));
+		if (n >= sizeof(nti.parity))
+			fatalx("%s: nti.parity name too long", __func__);
+
+		n = strlcpy(nti.name, thing->name, sizeof(nti.name));
+		if (n >= sizeof(nti.name))
+			fatalx("%s: nti.name too long", __func__);
+
+		n = strlcpy(nti.password, thing->password,
+		    sizeof(nti.password));
+		if (n >= sizeof(nti.password))
+			fatalx("%s: nti.password too long", __func__);
+
+		n = strlcpy(nti.location, thing->location,
+		    sizeof(nti.location));
+		if (n >= sizeof(nti.location))
+			fatalx("%s: nti.location too long", __func__);
+
+		n = strlcpy(nti.udp, thing->udp, sizeof(nti.udp));
+		if (n >= sizeof(nti.udp))
+			fatalx("%s: nti.name too long", __func__);
+
+		nti.fd = thing->fd;
+		nti.baud = thing->baud;
+		nti.conn_port = thing->conn_port;
+		nti.rcv_port = thing->rcv_port;
+		nti.data_bits = thing->data_bits;
+		nti.max_clients = thing->max_clients;
+		nti.port = thing->port;
+		nti.stop_bits = thing->stop_bits;
+		nti.type = thing->type;
+		nti.client_cnt = thing->client_cnt;
+
+		nti.tls = thing->tls;
+
+		n = strlcpy(nti.tls_cert_file, thing->tls_cert_file,
+		    sizeof(nti.tls_cert_file));
+		if (n >= sizeof(nti.tls_cert_file))
+			fatalx("%s: nti.tls_cert_file too long", __func__);
+
+		n = strlcpy(nti.tls_key_file, thing->tls_key_file,
+		    sizeof(nti.tls_key_file));
+		if (n >= sizeof(nti.tls_key_file))
+			fatalx("%s: nti.tls_key_file too long", __func__);
+
+		n = strlcpy(nti.tls_ca_file, thing->tls_ca_file,
+		    sizeof(nti.tls_ca_file));
+		if (n >= sizeof(nti.tls_ca_file))
+			fatalx("%s: nti.tls_ca_file too long", __func__);
+
+		n = strlcpy(nti.tls_crl_file, thing->tls_crl_file,
+		    sizeof(nti.tls_crl_file));
+		if (n >= sizeof(nti.tls_crl_file))
+			fatalx("%s: nti.tls_crl_file too long", __func__);
+
+		n = strlcpy(nti.tls_ocsp_staple_file,
+		    thing->tls_ocsp_staple_file,
+		    sizeof(nti.tls_ocsp_staple_file));
+		if (n >= sizeof(nti.tls_ocsp_staple_file))
+			fatalx("%s: nti.tls_ocsp_staple_file too long",
+			    __func__);
+
+		proc_compose(ps, PROC_THINGS, IMSG_ADD_THING,
+		    &nti, sizeof(nti));
 	}
-	if (event & EV_WRITE) {
-		if ((n = msgbuf_write(&ibuf->w)) == -1 && errno != EAGAIN)
-			fatal("msgbuf_write");
-		if (n == 0)
-			shut = 1;
-	}
-
-	for (;;) {
-		if ((n = imsg_get(ibuf, &imsg)) == -1)
-			fatal("imsg_get");
-
-		if (n == 0)
-			break;
-
-		switch (imsg.hdr.type) {
-		case IMSG_SHOW_PKTS:
-		case IMSG_LIST_CLTS:
-		case IMSG_LIST_THGS:
-		case IMSG_LIST_SOCKS:
-		case IMSG_CTL_END:
-			control_imsg_relay(&imsg);
-			break;
-		default:
-			log_debug("%s: error handling imsg %d", __func__,
-			    imsg.hdr.type);
-			break;
-		}
-		imsg_free(&imsg);
-	}
-	if (!shut)
-		imsg_event_add(iev);
-	else {
-		/* this pipe is dead, so remove the event handler */
-		event_del(&iev->ev);
-		event_loopexit(NULL);
-	}
-}
-
-int
-main_imsg_compose_thgs(int type, pid_t pid, void *data, uint16_t datalen)
-{
-	return (imsg_compose_event(iev_thgs, type, 0, pid, -1, data, datalen));
 }

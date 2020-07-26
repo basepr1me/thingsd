@@ -19,39 +19,49 @@
 #include <sys/socket.h>
 
 #include <event.h>
+#include <imsg.h>
 #include <stdbool.h>
 #include <string.h>
 
+#include "proc.h"
 #include "thingsd.h"
 
 void
-udp_evt(int fd, short event, void *arg)
+udp_event(int fd, short event, void *arg)
 {
-	struct thgsd		*pthgsd = (struct thgsd *)arg;
-	struct thg		*thg = NULL, *tthg;
-	struct clt		*clt;
-	char			 pkt[BUFF];
+	struct thingsd		*env = (struct thingsd *)arg;
+	struct thing		*thing = NULL, *tthing;
+	struct client		*client;
+	char			 pkt[PKT_BUFF];
 	int			 len;
 	size_t			 n;
 	socklen_t		*addrlen = NULL;
 	struct sockaddr		*addr = NULL;
 
 	memset(pkt, 0, sizeof(pkt));
-	TAILQ_FOREACH(tthg, &pthgsd->thgs, entry) {
-		if (tthg->fd == fd) {
-			thg = tthg;
+
+	TAILQ_FOREACH(tthing, env->things, entry) {
+		if (tthing->fd == fd) {
+			thing = tthing;
 			break;
 		}
 	}
+
 	len = recvfrom(fd, pkt, sizeof(pkt), 0, addr, addrlen);
+
 	if (len > 0) {
 		/*  write to clients */
-		TAILQ_FOREACH(clt, &pthgsd->clts, entry) {
-			for (n = 0; n < clt->le; n++) {
-				if (strcmp(clt->sub_names[n], thg->name) == 0)
-					bufferevent_write(clt->bev, pkt, len);
+		TAILQ_FOREACH(client, env->clients, entry) {
+			for (n = 0; n < client->le; n++) {
+				if (strcmp(client->sub_names[n],
+				    thing->name) == 0)
+					bufferevent_write(client->bev, pkt,
+					    len);
 			}
 		}
-		send_ctl_pkt(thg->name, pkt, len);
+
+		if (env->packet_client_count > 0)
+			send_to_packet_client(env, thing->name, pkt, len);
+
 	}
 }

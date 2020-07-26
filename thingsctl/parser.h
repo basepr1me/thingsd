@@ -17,20 +17,24 @@
 
 enum actions {
 	NONE,
+	KILL_CLIENT,
+	LIST,
+	LIST_CLIENTS,
+	LIST_SOCKETS,
+	LIST_THINGS,
+	LOG_BRIEF,
 	LOG_DEBUG,
 	LOG_VERBOSE,
-	LOG_BRIEF,
-	LIST_CLTS,
-	LIST_THGS,
-	LIST_SOCKS,
-	KILL_CLT,
-	SHOW_PKTS,
+	RELOAD,
+	SHOW,
+	SHOW_CONTROL,
+	SHOW_PACKETS,
+	SHOW_PARENT,
 };
 
 struct parse_result {
-	char		*clt_name;
-	char		*thg_name;
-	enum actions	 action;
+	enum actions	action;
+	char		name[THINGSD_MAXNAME];
 };
 
 struct parse_result	*parse(int, char *[]);

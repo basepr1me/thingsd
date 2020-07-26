@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 - 2020 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2019, 2020 Tracey Emery <tracey@traceyemery.net>
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -23,7 +23,6 @@
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <net/if.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
 
@@ -31,21 +30,24 @@
 #include <errno.h>
 #include <event.h>
 #include <imsg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+#include "proc.h"
 #include "thingsd.h"
 #include "parser.h"
 
-__dead void		 usage(void);
-int			 show_list_msg(struct imsg *);
-void			 print_clts(struct clt_imsg *);
-void			 print_thgs(struct thg_imsg *);
-void			 print_socks(struct sock_imsg *);
+__dead void	 usage(void);
+int		 list_things_msg(struct imsg *);
+int		 list_clients_msg(struct imsg *);
+int		 list_sockets_msg(struct imsg *);
+int		 show_parent_msg(struct imsg *);
+int		 show_control_msg(struct imsg *);
 
-struct imsgbuf		*ibuf;
+struct imsgbuf	*ibuf;
 
 __dead void
 usage(void)
@@ -66,13 +68,10 @@ main(int argc, char *argv[])
 	int			 ctl_sock;
 	int			 done = 0;
 	int			 n, verbose = 0;
-	int			 ch;
-	int			 type;
-	char			*sockname, *ctl_pkt;
+	int			 ch, v = 0;
+	char			*sockname, *ctl_pkt = NULL;
 
-	sockname = strdup(THINGSD_SOCK);
-	if (sockname == NULL)
-		err(1, "strdup");
+	sockname = THINGSD_SOCKET;
 	while ((ch = getopt(argc, argv, "s:")) != -1) {
 		switch (ch) {
 		case 's':
@@ -108,13 +107,13 @@ main(int argc, char *argv[])
 	imsg_init(ibuf, ctl_sock);
 	done = 0;
 
-	/* Check for root-only actions */
+	/* Check for root only actions */
 	switch (res->action) {
 	case LOG_DEBUG:
 	case LOG_VERBOSE:
 	case LOG_BRIEF:
-	case KILL_CLT:
-	case SHOW_PKTS:
+	case KILL_CLIENT:
+	case SHOW_PACKETS:
 		if (geteuid() != 0)
 			errx(1, "need root privileges");
 		break;
@@ -124,44 +123,71 @@ main(int argc, char *argv[])
 
 	/* Process user request. */
 	switch (res->action) {
-	case SHOW_PKTS:
-		imsg_compose(ibuf, IMSG_SHOW_PKTS, 0, 0, -1,
-		    res->thg_name, strlen(res->thg_name));
-		free(res->thg_name);
-		break;
-	case KILL_CLT:
-		imsg_compose(ibuf, IMSG_KILL_CLT, 0, 0, -1,
-		    res->clt_name, strlen(res->clt_name));
-		printf("kill request for client \"%s\" sent\n", res->clt_name);
-		free(res->clt_name);
+	case KILL_CLIENT:
+		imsg_compose(ibuf, IMSG_KILL_CLIENT, 0, 0, -1,
+		    res->name, strlen(res->name));
+		printf("\nKill request sent for client '%s'.\n", res->name);
 		done = 1;
+		break;
+	case LIST_CLIENTS:
+		imsg_compose(ibuf, IMSG_GET_INFO_CLIENTS_REQUEST, 0,
+		    0, -1, res->name, sizeof(res->name));
+		break;
+	case LIST_SOCKETS:
+		imsg_compose(ibuf, IMSG_GET_INFO_SOCKETS_REQUEST, 0,
+		    0, -1, res->name, sizeof(res->name));
+		break;
+	case LIST_THINGS:
+		imsg_compose(ibuf, IMSG_GET_INFO_THINGS_REQUEST, 0,
+		    0, -1, res->name, sizeof(res->name));
 		break;
 	case LOG_DEBUG:
-		verbose |= L_VERBOSE2;
+		verbose++;
 		/* FALLTHROUGH */
 	case LOG_VERBOSE:
-		verbose |= L_VERBOSE1;
+		verbose++;
 		/* FALLTHROUGH */
 	case LOG_BRIEF:
-		imsg_compose(ibuf, IMSG_THGS_LOG_VERBOSE, 0, 0, -1,
+		imsg_compose(ibuf, IMSG_CTL_VERBOSE, 0, 0, -1,
 		    &verbose, sizeof(verbose));
-		printf("logging request sent\n");
+		printf("\nLogging request sent.\n");
 		done = 1;
 		break;
-	case LIST_CLTS:
-		type = THGS_LIST_CLTS;
-		imsg_compose(ibuf, IMSG_THGS_LIST, 0, 0, -1, &type,
-		    sizeof(type));
+	case SHOW_CONTROL:
+		imsg_compose(ibuf, IMSG_GET_INFO_CONTROL_REQUEST, 0,
+		    0, -1, NULL, 0);
 		break;
-	case LIST_THGS:
-		type = THGS_LIST_THGS;
-		imsg_compose(ibuf, IMSG_THGS_LIST, 0, 0, -1, &type,
-		    sizeof(type));
+	case SHOW_PACKETS:
+		printf("\nEchoing thing packets may have unexcpected ");
+		printf("consequences!\n");
+		printf("Are you sure you want to echo packets? (y|n) ");
+		ch = getchar();
+		if (ch == 'y' || ch == 'Y') {
+			printf("Waiting for incoming packets\n");
+			imsg_compose(ibuf, IMSG_SHOW_PACKETS_REQUEST, 0,
+			    0, -1, res->name, sizeof(res->name));
+		} else
+			printf("Echo packets ignored\n");
+		printf("\n");
 		break;
-	case LIST_SOCKS:
-		type = THGS_LIST_SOCKS;
-		imsg_compose(ibuf, IMSG_THGS_LIST, 0, 0, -1, &type,
-		    sizeof(type));
+	case SHOW_PARENT:
+		imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0,
+		    0, -1, NULL, 0);
+		break;
+	case RELOAD:
+		printf("\nAll things and sockets will be reset.\n");
+		printf("This can have unintended consequences!\n");
+		printf("For example, all clients will have to reconnect.\n\n");
+		printf("Are you sure you want to reload the config? (y|n) ");
+		ch = getchar();
+		if (ch == 'y' || ch == 'Y') {
+			imsg_compose(ibuf, IMSG_CTL_RESET, 0, 0, -1, &v,
+			    sizeof(v));
+			printf("Reload request sent\n");
+		} else
+			printf("Reload request ignored\n");
+		printf("\n");
+		done = 1;
 		break;
 	default:
 		usage();
@@ -170,6 +196,7 @@ main(int argc, char *argv[])
 	while (ibuf->w.queued)
 		if (msgbuf_write(&ibuf->w) <= 0 && errno != EAGAIN)
 			err(1, "write error");
+
 	while (!done) {
 		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
 			errx(1, "imsg_read error");
@@ -183,26 +210,38 @@ main(int argc, char *argv[])
 				break;
 
 			switch (res->action) {
-			case SHOW_PKTS:
-				if (imsg.hdr.type == IMSG_CTL_END) {
+			case LIST_CLIENTS:
+				done = list_clients_msg(&imsg);
+				break;
+			case LIST_SOCKETS:
+				done = list_sockets_msg(&imsg);
+				break;
+			case LIST_THINGS:
+				done = list_things_msg(&imsg);
+				break;
+			case SHOW_CONTROL:
+				done = show_control_msg(&imsg);
+				break;
+			case SHOW_PACKETS:
+				if (imsg.hdr.type ==
+				    IMSG_SHOW_PACKETS_END_DATA) {
 					done = 1;
 					break;
 				}
-				if ((ctl_pkt = calloc(IMSG_DATA_SIZE(imsg),
+				if ((ctl_pkt = calloc(IMSG_DATA_SIZE(&imsg),
 				    sizeof(*ctl_pkt))) == NULL)
 					errx(1, "calloc ctl_pkt");
 				if ((ctl_pkt = strndup(imsg.data,
-				    IMSG_DATA_SIZE(imsg))) == NULL) {
+				    IMSG_DATA_SIZE(&imsg))) == NULL) {
 					free(ctl_pkt);
 					break;
 				}
 				printf("%s\n", ctl_pkt);
 				free(ctl_pkt);
+				ctl_pkt = NULL;
 				break;
-			case LIST_CLTS:
-			case LIST_THGS:
-			case LIST_SOCKS:
-				done = show_list_msg(&imsg);
+			case SHOW_PARENT:
+				done = show_parent_msg(&imsg);
 				break;
 			default:
 				break;
@@ -210,117 +249,183 @@ main(int argc, char *argv[])
 			imsg_free(&imsg);
 		}
 	}
+	printf("\n");
 	close(ctl_sock);
+	free(ctl_pkt);
 	free(ibuf);
-	free(sockname);
 
 	return (0);
 }
 
 int
-show_list_msg(struct imsg *imsg)
+show_parent_msg(struct imsg *imsg)
 {
-	struct clt_imsg		*comp_clt;
-	struct thg_imsg		*comp_thg;
-	struct sock_imsg	*comp_sock;
+	struct thingsd_parent_info *npi;
 
 	switch (imsg->hdr.type) {
-	case IMSG_LIST_CLTS:
-		comp_clt = (struct clt_imsg *)imsg->data;
-		print_clts(comp_clt);
+	case IMSG_GET_INFO_PARENT_DATA:
+		npi = imsg->data;
+		printf("\nParent says: Logging level is ");
+		if (npi->verbose == 2)
+			printf("debug");
+		else if (npi->verbose == 1)
+			printf("verbose");
+		else
+			printf("brief");
+		printf(" (%d).\n", npi->verbose);
 		break;
-	case IMSG_LIST_THGS:
-		comp_thg = (struct thg_imsg *)imsg->data;
-		print_thgs(comp_thg);
-		break;
-	case IMSG_LIST_SOCKS:
-		comp_sock = (struct sock_imsg *)imsg->data;
-		print_socks(comp_sock);
-		break;
-	case IMSG_CTL_END:
+	case IMSG_GET_INFO_PARENT_END_DATA:
 		return (1);
 	default:
 		break;
 	}
+
 	return (0);
 }
 
-void
-print_clts(struct clt_imsg *pclts)
+int
+show_control_msg(struct imsg *imsg)
 {
-	if (pclts->subscribed == false)
-		return;
+	struct thingsd_control_info *nci;
 
-	printf("Client Name:\t\t\t%s\n", pclts->name);
-	printf("\tfd:\t\t\t%d\n", pclts->fd);
-	printf("\tPort:\t\t\t%d\n", pclts->port);
-	if (pclts->tls == true)
-		printf("\tTLS:\t\t\tyes\n");
-	printf("\tSubscriptions:\t\t%zu\n", pclts->subs);
-}
-
-void
-print_thgs(struct thg_imsg *pthgs)
-{
-	if (pthgs->exists == false)
-		return;
-
-	printf("Thing Name:\t\t\t%s\n", pthgs->name);
-	switch(pthgs->type) {
-	case TCP:
-		printf("\tIP Addr:\t\t%s\n", pthgs->ipaddr);
-		printf("\tConnect Port:\t\t%d\n", pthgs->conn_port);
-		printf("\tPersists:\t\t%d\n", pthgs->persist);
+	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_CONTROL_DATA:
+		nci = imsg->data;
+		printf("\nControl says: Logging level is ");
+		if (nci->verbose == 2)
+			printf("debug");
+		else if (nci->verbose == 1)
+			printf("verbose");
+		else
+			printf("brief");
+		printf(" (%d).\n", nci->verbose);
 		break;
-	case UDP:
-		printf("\tUDP Listener:\t\t%s\n", pthgs->udp);
-		printf("\tConnect Port:\t\t%d\n", pthgs->conn_port);
-		break;
-	case DEV:
-		printf("\tDevice:\t\t\t%s\n", pthgs->location);
-		printf("\tBaud:\t\t\t%d\n", pthgs->baud);
-		printf("\tData:\t\t\t%d\n", pthgs->data_bits);
-		printf("\tStop:\t\t\t%d\n", pthgs->stop_bits);
-		printf("\tHardware:\t\t%d\n", pthgs->hw_ctl);
-		printf("\tSoftware:\t\t%d\n", pthgs->sw_ctl);
-		printf("\tParity:\t\t\t%s\n", pthgs->parity);
+	case IMSG_GET_INFO_CONTROL_END_DATA:
+		return (1);
+	default:
 		break;
 	}
-	if (strncmp(pthgs->iface, "", BUFF) == 0)
-		printf("\tBind Interface:\t\tall\n");
-	else
-		printf("\tBind Interface:\t\t%s\n", pthgs->iface);
-	printf("\tListen Port:\t\t%d\n", pthgs->port);
-	if (pthgs->max_clt == 0)
-		printf("\tMax Clients:\t\tunlimited\n");
-	else
-		printf("\tMax Clients:\t\t%d\n", pthgs->max_clt);
-	printf("\tPassword:\t\t%s\n", pthgs->password);
-	printf("\tClient Count:\t\t%zu\n", pthgs->clt_cnt);
-	if (pthgs->tls == false)
-		return;
-	printf("\tTLS:\t\t\t%d\n", pthgs->tls);
-	printf("\tCert:\t\t\t%s\n", pthgs->tls_cert_file);
-	printf("\tKey:\t\t\t%s\n", pthgs->tls_key_file);
-	printf("\tCA:\t\t\t%s\n", pthgs->tls_ca_file);
-	printf("\tCRL:\t\t\t%s\n", pthgs->tls_crl_file);
-	printf("\tOCSP:\t\t\t%s\n", pthgs->tls_ocsp_staple_file);
+
+	return (0);
 }
 
-void
-print_socks(struct sock_imsg *psocks)
+int
+list_things_msg(struct imsg *imsg)
 {
-	if (strcmp(psocks->name, "") == 0)
-		printf("Socket Name:\t\t\tReceive socket\n");
-	else
-		printf("Socket Name:\t\t\t%s\n", psocks->name);
-	printf("\tfd:\t\t\t%d\n", psocks->fd);
-	printf("\tPort:\t\t\t%d\n", psocks->port);
-	if (psocks->tls == true)
-		printf("\tTLS:\t\t\tyes\n\n");
-	printf("\tClient Count:\t\t%zu\n", psocks->clt_cnt);
-	if (psocks->max_clts == 0)
-		printf("\tMax Clients:\t\tunlimited\n");
-	else
-		printf("\tMax Clients:\t\t%zu\n", psocks->max_clts);
+	struct thing	*nti;
+
+	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_THINGS_DATA:
+		nti = (struct thing *) imsg->data;
+
+		printf("\nThing Name:\t\t\t%s\n", nti->name);
+		switch(nti->type) {
+		case TCP:
+			printf("\tIP Addr:\t\t%s\n", nti->ipaddr);
+			printf("\tConnect Port:\t\t%d\n", nti->conn_port);
+			printf("\tPersists:\t\t%d\n", nti->persist);
+			break;
+		case UDP:
+			printf("\tUDP Listener:\t\t%s\n", nti->udp);
+			printf("\tConnect Port:\t\t%d\n", nti->rcv_port);
+			break;
+		case DEV:
+			printf("\tDevice:\t\t\t%s\n", nti->location);
+			printf("\tBaud:\t\t\t%d\n", nti->baud);
+			printf("\tData:\t\t\t%d\n", nti->data_bits);
+			printf("\tStop:\t\t\t%d\n", nti->stop_bits);
+			printf("\tHardware:\t\t%d\n", nti->hw_ctl);
+			printf("\tSoftware:\t\t%d\n", nti->sw_ctl);
+			printf("\tParity:\t\t\t%s\n", nti->parity);
+			break;
+	}
+		if (strncmp(nti->iface, "", PKT_BUFF) == 0)
+			printf("\tBind Interface:\t\tall\n");
+		else
+			printf("\tBind Interface:\t\t%s\n", nti->iface);
+		printf("\tListen Port:\t\t%d\n", nti->port);
+		if (nti->max_clients == 0)
+			printf("\tMax Clients:\t\tunlimited\n");
+		else
+			printf("\tMax Clients:\t\t%d\n", nti->max_clients);
+		printf("\tPassword:\t\t%s\n", nti->password);
+		printf("\tClient Count:\t\t%zu\n", nti->client_cnt);
+		if (nti->tls == false)
+			break;
+		printf("\tTLS:\t\t\t%d\n", nti->tls);
+		printf("\tCert:\t\t\t%s\n", nti->tls_cert_file);
+		printf("\tKey:\t\t\t%s\n", nti->tls_key_file);
+		printf("\tCA:\t\t\t%s\n", nti->tls_ca_file);
+		printf("\tCRL:\t\t\t%s\n", nti->tls_crl_file);
+		printf("\tOCSP:\t\t\t%s\n", nti->tls_ocsp_staple_file);
+
+		break;
+	case IMSG_GET_INFO_THINGS_END_DATA:
+		return (1);
+	default:
+		break;
+	}
+
+	return (0);
+}
+
+int
+list_clients_msg(struct imsg *imsg)
+{
+	struct client	*nci;
+
+	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_CLIENTS_DATA:
+		nci = (struct client *) imsg->data;
+
+		if (nci->subscribed == false)
+			break;
+
+		printf("\nClient Name:\t\t\t%s\n", nci->name);
+		printf("\tfd:\t\t\t%d\n", nci->fd);
+		printf("\tPort:\t\t\t%d\n", nci->port);
+		if (nci->tls == true)
+			printf("\tTLS:\t\t\tyes\n");
+		printf("\tSubscriptions:\t\t%zu\n", nci->subs);
+		break;
+	case IMSG_GET_INFO_CLIENTS_END_DATA:
+		return (1);
+	default:
+		break;
+	}
+
+	return (0);
+}
+
+int
+list_sockets_msg(struct imsg *imsg)
+{
+	struct socket	*nsi;
+
+	switch (imsg->hdr.type) {
+	case IMSG_GET_INFO_SOCKETS_DATA:
+		nsi = (struct socket *) imsg->data;
+
+		printf("\n");
+		if (strcmp(nsi->name, "") == 0)
+			printf("Socket Name:\t\t\tReceive socket\n");
+		else
+			printf("Socket Name:\t\t\t%s\n", nsi->name);
+		printf("\tfd:\t\t\t%d\n", nsi->fd);
+		printf("\tPort:\t\t\t%d\n", nsi->port);
+		if (nsi->tls == true)
+			printf("\tTLS:\t\t\tyes\n\n");
+		printf("\tClient Count:\t\t%zu\n", nsi->client_cnt);
+		if (nsi->max_clients == 0)
+			printf("\tMax Clients:\t\tunlimited\n");
+		else
+			printf("\tMax Clients:\t\t%zu\n", nsi->max_clients);
+		break;
+	case IMSG_GET_INFO_SOCKETS_END_DATA:
+		return (1);
+	default:
+		break;
+	}
+
+	return (0);
 }

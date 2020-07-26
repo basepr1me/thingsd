@@ -50,23 +50,28 @@ must be quoted.
 .Sh GLOBAL CONFIGURATION
 Here are the settings that can be set globally:
 .Bl -tag -width Ds
-.It Ic default port Ar number
-Set the default port for things to communicate on.
-This is a required setting.
 .It Ic bind interface Ar string
 Specify a single interface to create sockets on.
 If this is not set,
 .Xr thingsd 8
 will attempt to open the default port on all network interfaces.
+.It Ic connection retry Ar number
+Set the lost connection thing watchdog interval.
+Default is 30 seconds.
+Range is 30-600 seconds.
+.It Ic default port Ar number
+Set the default port for things to communicate on.
+This is a required setting.
 .It Ic max clients Ar number
 Set the default maximum number of clients allowed to connect to each
 .Xr thingsd 8 thing.
 .It Ic max subscriptions Ar number
 Set the maximum number of things a client can subscribe to at a time.
-.It Ic connection retry Ar number
-Set the lost connection thing watchdog interval.
-Default is 30 seconds.
-Range is 30-600 seconds.
+.It Ic prefork Ar number
+Run the specified number of things processes.
+This increases the performance and prevents delays when connecting to a thing.
+.Xr thingsd 8
+runs 3 things processes by default.
 .El
 .Sh THINGS
 things represent a serial, TCP/IP, or UDP listener thing for
@@ -85,9 +90,6 @@ Specify a single interface to create a
 or
 .Ar ipaddr
 thing socket.
-.It Ic data Ar number
-Set the data bits for a serial thing
-.Ar location .
 .It Ic connect on port Ar number
 Set the TCP/IP port to connect to for an
 .Ar ipaddr
@@ -95,12 +97,9 @@ thing.
 This setting is required for
 .Ar ipaddr
 things.
-.It Ic thing Ar string Brq ...
-Declaration of a thing for
-.Xr thingsd 8
-to setup and the name
-.Xr thingsd 8
-will use for client subscriptions.
+.It Ic data Ar number
+Set the data bits for a serial thing
+.Ar location .
 .It Ic hardware Ar number
 Set to 1 to turn on hardware control for a serial thing
 .Ar location .
@@ -165,6 +164,12 @@ Set to 1 to turn on software control for a serial thing
 .It Ic stop Ar number
 Set the stop bit for a serial thing
 .Ar location .
+.It Ic thing Ar string Brq ...
+Declaration of a thing for
+.Xr thingsd 8
+to setup and the name
+.Xr thingsd 8
+will use for client subscriptions.
 .It Ic tls Ar option
 Set the TLS configuration for a thing.
 These options are only used if TLS has been enabled via the listen directive.
@@ -256,6 +261,11 @@ Create a
 .Ar thing
 which listens for user datagram protocol packets.
 .El
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa /etc/thingsd.conf
+.Xr thingsd 8 configuration file.
+.El
 .Sh EXAMPLES
 This configuration file would create a serial thing and a TCP/IP host thing.
 The serial thing would communicate on the default port, while the local network
@@ -265,6 +275,8 @@ ipaddr thing would communicate on a separate port.
 #
 # Global Options
 #
+
+prefork 5
 
 default port 50000
 
@@ -301,11 +313,6 @@ thing "udp_thing" {
 	}
 }
 .Ed
-.Sh FILES
-.Bl -tag -width Ds -compact
-.It Pa /etc/thingsd.conf
-.Xr thingsd 8 configuration file.
-.El
 .Sh SEE ALSO
 .Xr thingsctl 8 ,
 .Xr thingsd 8
