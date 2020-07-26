@@ -318,14 +318,12 @@ things_stop_pkt(struct privsep *ps, struct imsg *imsg)
 			    packet_client, entry);
 			log_debug("control packet echo request stopping for %s",
 			    packet_client->name);
-
+			thingsd_env->packet_client_count--;
 			free(packet_client);
-
 			return;
 		}
 	}
 
-	thingsd_env->packet_client_count--;
 }
 
 void
