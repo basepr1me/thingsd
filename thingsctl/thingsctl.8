@@ -44,6 +44,12 @@ to communicate with
 .Pp
 The following commands are available:
 .Bl -tag -width Ds
+.It Cm echo Ar string
+Echo a thing's packets by its name.
+A thing could be sending hostile data!
+Use at your own risk.
+.It Cm kill Ar string
+Disconnect a subscribed client from thingsd by client name.
 .It Cm list clients
 Show all clients connected to things.
 .It Cm list sockets
@@ -57,13 +63,16 @@ Disable verbose logging.
 Enable verbose logging.
 .It Cm log debug
 Enable very noisy debug logging.
-.It Cm kill Ar string
-Disconnect a subscribed client from thingsd by client name.
-.It Cm show Ar string
-View string version of a thing's packets by its name.
-Showing packets blocks all other calls.
-A thing could be sending binary data!
-Use at your own risk.
+.It Cm show client Ar string
+Show the data for a single client by name.
+.It Cm show control
+Return control process logging verbosity.
+.It Cm show parent
+Return parent process logging verbosity.
+.It Cm show socket Ar string
+Show the data for a single socket by name.
+.It Cm show thing Ar string
+Show the data for a single thing by name.
 .El
 .Sh FILES
 .Bl -tag -width "/var/run/thingsd.sockXX" -compact
@@ -75,8 +84,3 @@ socket used for communication with
 .Sh SEE ALSO
 .Xr thingsd.conf 5 ,
 .Xr thingsd 8
-.Sh HISTORY
-The
-.Nm
-program first appeared in
-.Ox 6.5 .

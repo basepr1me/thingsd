@@ -158,8 +158,17 @@ main(int argc, char *argv[])
 		    0, -1, NULL, 0);
 		break;
 	case SHOW_PACKETS:
-		imsg_compose(ibuf, IMSG_SHOW_PACKETS_REQUEST, 0,
-		    0, -1, res->name, sizeof(res->name));
+		printf("\nEchoing thing packets may have unexcpected ");
+		printf("consequences!\n");
+		printf("Are you sure you want to echo packets? (y|n) ");
+		ch = getchar();
+		if (ch == 'y' || ch == 'Y') {
+			printf("Waiting for incoming packets\n");
+			imsg_compose(ibuf, IMSG_SHOW_PACKETS_REQUEST, 0,
+			    0, -1, res->name, sizeof(res->name));
+		} else
+			printf("Echo packets ignored\n");
+		printf("\n");
 		break;
 	case SHOW_PARENT:
 		imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0,

@@ -299,6 +299,7 @@ things_echo_pkt(struct privsep *ps, struct imsg *imsg)
 	packet_client->imsg = *imsg;
 	memcpy(packet_client->name, imsg->data,  sizeof(packet_client->name));
 
+	log_debug("control packet echo request for %s", packet_client->name);
 	TAILQ_INSERT_TAIL(thingsd_env->packet_clients, packet_client, entry);
 }
 
@@ -315,6 +316,8 @@ things_stop_pkt(struct privsep *ps, struct imsg *imsg)
 		if (fd == packet_client->imsg.hdr.peerid) {
 			TAILQ_REMOVE(thingsd_env->packet_clients,
 			    packet_client, entry);
+			log_debug("control packet echo request stopping for %s",
+			    packet_client->name);
 
 			free(packet_client);
 
@@ -497,7 +500,7 @@ do_reconn(void)
 		    thingsd_env->conn_retry) {
 			dead_thing->dtime = time(NULL);
 
-			log_info("attempting to reconnect %s",
+			log_debug("attempting to reconnect %s",
 			    dead_thing->name);
 
 			switch (dead_thing->type) {
