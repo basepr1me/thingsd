@@ -414,7 +414,7 @@ socket_rd(struct bufferevent *bev, void *arg)
 	struct thing		*thing = NULL, *tthing;
 	struct client		*client;
 	size_t			 len;
-	int			 fd = bev->ev_read.ev_fd, snm;
+	int			 fd = bev->ev_read.ev_fd;
 	size_t			 n;
 	char			*pkt = NULL;
 
@@ -440,15 +440,9 @@ socket_rd(struct bufferevent *bev, void *arg)
 				}
 			}
 
-			if (env->packet_client_count > 0) {
-				if (strlen(env->packet_client.name) != 0)
-					if ((snm = strcmp(thing->name,
-					    env->packet_client.name)) == 0)
-						send_to_packet_client(
-						    &env->packet_client.ps,
-						    &env->packet_client.imsg,
-						    thing->name, pkt, len);
-			}
+			if (env->packet_client_count > 0)
+				send_to_packet_client(env, thing->name, pkt,
+				    len);
 
 			free(pkt);
 			pkt = NULL;

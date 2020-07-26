@@ -33,7 +33,7 @@ udp_event(int fd, short event, void *arg)
 	struct thing		*thing = NULL, *tthing;
 	struct client		*client;
 	char			 pkt[PKT_BUFF];
-	int			 len, snm;
+	int			 len;
 	size_t			 n;
 	socklen_t		*addrlen = NULL;
 	struct sockaddr		*addr = NULL;
@@ -60,15 +60,8 @@ udp_event(int fd, short event, void *arg)
 			}
 		}
 
-		if (env->packet_client_count > 0) {
-			if (strlen(env->packet_client.name) != 0)
-				if ((snm = strcmp(thing->name,
-				    env->packet_client.name)) == 0)
-					send_to_packet_client(
-					    &env->packet_client.ps,
-					    &env->packet_client.imsg,
-					    thing->name, pkt, len);
-		}
+		if (env->packet_client_count > 0)
+			send_to_packet_client(env, thing->name, pkt, len);
 
 	}
 }

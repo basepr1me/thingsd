@@ -287,22 +287,41 @@ things_shutdown(void)
 void
 things_echo_pkt(struct privsep *ps, struct imsg *imsg)
 {
-	/* if (thingsd_env->packet_client.exists) */
-	/* 	return; */
+	struct packet_client	*packet_client;
+
+	packet_client = calloc(1, sizeof(*packet_client));
+	if (packet_client == NULL)
+		fatalx("no calloc packet_client");
+
 	thingsd_env->packet_client_count++;
 
+	packet_client->ps = *ps;
+	packet_client->imsg = *imsg;
+	memcpy(packet_client->name, imsg->data,  sizeof(packet_client->name));
 
-	thingsd_env->packet_client.ps = *ps;
-	thingsd_env->packet_client.imsg = *imsg;
-	memcpy(thingsd_env->packet_client.name, imsg->data,
-	    sizeof(thingsd_env->packet_client.name));
+	TAILQ_INSERT_TAIL(thingsd_env->packet_clients, packet_client, entry);
 }
 
 void
-things_stop_pkt(void)
+things_stop_pkt(struct privsep *ps, struct imsg *imsg)
 {
-	/* memset(thingsd_env->packet_client.name, 0, */
-	/*     sizeof(thingsd_env->packet_client.name)); */
+	struct packet_client	*packet_client, *tpacket_client;
+	uint32_t		 fd;
+
+	memcpy(&fd, imsg->data, sizeof(fd));
+
+	TAILQ_FOREACH_SAFE(packet_client, thingsd_env->packet_clients, entry,
+	    tpacket_client) {
+		if (fd == packet_client->imsg.hdr.peerid) {
+			TAILQ_REMOVE(thingsd_env->packet_clients,
+			    packet_client, entry);
+
+			free(packet_client);
+
+			return;
+		}
+	}
+
 	thingsd_env->packet_client_count--;
 }
 
@@ -450,7 +469,8 @@ struct dead_thing
 	struct dead_thing	*dead_thing;
 	size_t			 n;
 
-	if ((dead_thing = calloc(1, sizeof(*dead_thing))) == NULL)
+	dead_thing = calloc(1, sizeof(*dead_thing));
+	if (dead_thing == NULL)
 		fatalx("no calloc dead_thing");
 
 	log_debug("%s: adding detached thing, %s", __func__, thing->name);
@@ -494,7 +514,7 @@ do_reconn(void)
 	TAILQ_FOREACH_SAFE(dead_thing,
 	    thingsd_env->dead_things->dead_things_list, entry, tdead_thing) {
 		TAILQ_FOREACH(thing, thingsd_env->things, entry) {
-			if (strcmp(thing->name, dead_thing->name) == 0 && 
+			if (strcmp(thing->name, dead_thing->name) == 0 &&
 			    thing->exists) {
 				TAILQ_REMOVE(thingsd_env->dead_things->
 				    dead_things_list,
@@ -513,10 +533,20 @@ do_reconn(void)
 }
 
 void
-send_to_packet_client(struct privsep *ps, struct imsg *imsg, char *name,
-    char *pkt, int len)
+send_to_packet_client(struct thingsd *env, char *name, char *pkt, int len)
 {
-	if (proc_compose_imsg(ps, PROC_CONTROL, -1,
-	    IMSG_SHOW_PACKETS_DATA, imsg->hdr.peerid, -1, pkt, len) == -1)
-		return;
+	struct packet_client	*packet_client;
+	int			 snm;
+
+	TAILQ_FOREACH(packet_client, env->packet_clients, entry) {
+		if (strlen(packet_client->name) != 0)
+			if ((snm = strcmp(name, packet_client->name)) == 0)
+				if (proc_compose_imsg(&packet_client->ps,
+				    PROC_CONTROL, -1, IMSG_SHOW_PACKETS_DATA,
+				    packet_client->imsg.hdr.peerid, -1,
+				    pkt, len) == -1)
+				return;
+
+
+	}
 }

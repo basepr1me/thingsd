@@ -43,8 +43,6 @@
 
 struct ctl_connlist ctl_conns;
 
-int	 show_ctl, show_fd;
-
 struct ctl_conn *control_connbyfd(int);
 void	 control_accept(int, short, void *);
 void	 control_close(struct privsep *, struct imsg *, int,
@@ -276,13 +274,10 @@ control_close(struct privsep *ps, struct imsg *imsg, int fd,
 		return;
 	}
 
-	if (fd == show_fd) {
-		show_ctl = 0;
-		if (proc_compose_imsg(ps, PROC_PARENT, -1,
-		    IMSG_SHOW_PACKETS_END_DATA, 0, -1,
-		    NULL, 0) == -1)
-			log_warn("shit");
-	}
+	if (proc_compose_imsg(ps, PROC_PARENT, -1,
+	    IMSG_SHOW_PACKETS_END_DATA, 0, -1,
+	    &fd, sizeof(fd)) == -1)
+		log_warn("fd not sent to parent to close");
 
 	msgbuf_clear(&c->iev.ibuf.w);
 	TAILQ_REMOVE(&ctl_conns, c, entry);
@@ -347,8 +342,6 @@ control_dispatch_imsg(int fd, short event, void *arg)
 
 		switch (imsg.hdr.type) {
 		case IMSG_SHOW_PACKETS_REQUEST:
-			show_ctl = 1;
-			show_fd = fd;
 		case IMSG_KILL_CLIENT:
 		case IMSG_GET_INFO_PARENT_REQUEST:
 		case IMSG_GET_INFO_THINGS_REQUEST:
@@ -380,12 +373,9 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			c->flags |= CTL_CONN_NOTIFY;
 			break;
 		case IMSG_CTL_VERBOSE:
-			log_info("%s", __func__);
 			IMSG_SIZE_CHECK(&imsg, &v);
-
 			memcpy(&v, imsg.data, sizeof(v));
 			log_setverbose(v);
-
 			proc_forward_imsg(ps, &imsg, PROC_PARENT, -1);
 			break;
 		case IMSG_GET_INFO_CONTROL_REQUEST:

@@ -212,6 +212,7 @@ struct packet_client {
 	TAILQ_ENTRY(packet_client)	 entry;
 	struct privsep		 ps;
 	struct imsg		 imsg;
+	int			 fd;
 	char			 name[THINGSD_MAXNAME];
 };
 TAILQ_HEAD(packetclientlist, packet_client);
@@ -251,8 +252,6 @@ struct thingsd {
 	/* control packets */
 	struct packetclientlist	*packet_clients;
 	int			 packet_client_count;
-	/* XXX: kill this when converted to multiple packet clients */
-	struct packet_client	 packet_client;
 };
 
 extern struct thingsd	*thingsd_env;
@@ -303,9 +302,8 @@ void	 do_reconn(void);
 void	 things_sighdlr(int, short, void *);
 void	 things_show_info(struct privsep *, struct imsg *);
 void	 things_echo_pkt(struct privsep *, struct imsg *);
-void	 things_stop_pkt(void);
-void	 send_to_packet_client(struct privsep *, struct imsg *, char *, char *,
-	    int);
+void	 things_stop_pkt(struct privsep *, struct imsg *);
+void	 send_to_packet_client(struct thingsd *, char *, char *, int);
 
 /* control.c */
 int	 config_init(struct thingsd *);

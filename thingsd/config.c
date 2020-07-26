@@ -72,10 +72,14 @@ config_init(struct thingsd *env)
 		    sizeof(*env->dead_things->dead_things_list));
 		if (env->dead_things->dead_things_list == NULL)
 			return (-1);
+		env->packet_clients = calloc(1, sizeof(*env->packet_clients));
+		if (env->packet_clients == NULL)
+			return (-1);
 		TAILQ_INIT(env->things);
 		TAILQ_INIT(env->sockets);
 		TAILQ_INIT(env->clients);
 		TAILQ_INIT(env->dead_things->dead_things_list);
+		TAILQ_INIT(env->packet_clients);
 	}
 	return (0);
 }
