@@ -90,6 +90,8 @@ things_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		memcpy(&nti, imsg->data, sizeof(nti));
 
 		thing = calloc(1, sizeof(*thing));
+		if (thing == NULL)
+			fatal("%s: calloc", __func__);
 
 		thing->exists = nti.exists;
 		thing->hw_ctl = nti.hw_ctl;
@@ -305,9 +307,8 @@ things_echo_pkt(struct privsep *ps, struct imsg *imsg)
 	struct packet_client	*packet_client;
 
 	packet_client = calloc(1, sizeof(*packet_client));
-
 	if (packet_client == NULL)
-		fatalx("no calloc packet_client");
+		fatal("%s: calloc", __func__);
 
 	thingsd_env->packet_client_count++;
 
@@ -489,7 +490,7 @@ struct dead_thing
 
 	dead_thing = calloc(1, sizeof(*dead_thing));
 	if (dead_thing == NULL)
-		fatalx("no calloc dead_thing");
+		fatal("%s: calloc", __func__);
 
 	log_debug("%s: adding detached thing, %s", __func__, thing->name);
 

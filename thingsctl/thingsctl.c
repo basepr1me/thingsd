@@ -103,7 +103,7 @@ main(int argc, char *argv[])
 		err(1, "pledge");
 
 	if ((ibuf = malloc(sizeof(struct imsgbuf))) == NULL)
-		err(1, NULL);
+		err(1, "%s: malloc", __func__);
 	imsg_init(ibuf, ctl_sock);
 	done = 0;
 
@@ -166,8 +166,10 @@ main(int argc, char *argv[])
 			printf("Waiting for incoming packets\n");
 			imsg_compose(ibuf, IMSG_SHOW_PACKETS_REQUEST, 0,
 			    0, -1, res->name, sizeof(res->name));
-		} else
+		} else {
 			printf("Echo packets ignored\n");
+			done = 1;
+		}
 		printf("\n");
 		break;
 	case SHOW_PARENT:
@@ -200,8 +202,13 @@ main(int argc, char *argv[])
 	while (!done) {
 		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
 			errx(1, "imsg_read error");
-		if (n == 0)
-			errx(1, "pipe closed");
+		if (n == 0) {
+			if (res->action == SHOW_PACKETS)
+				errx(1, "Bad thing name request, or thingsd " \
+				    "shutdown.\n");
+			else
+				errx(1, "pipe closed");
+		}
 
 		while (!done) {
 			if ((n = imsg_get(ibuf, &imsg)) == -1)
@@ -230,7 +237,7 @@ main(int argc, char *argv[])
 				}
 				if ((ctl_pkt = calloc(IMSG_DATA_SIZE(&imsg),
 				    sizeof(*ctl_pkt))) == NULL)
-					errx(1, "calloc ctl_pkt");
+					err(1, "%s: calloc", __func__);
 				if ((ctl_pkt = strndup(imsg.data,
 				    IMSG_DATA_SIZE(&imsg))) == NULL) {
 					free(ctl_pkt);

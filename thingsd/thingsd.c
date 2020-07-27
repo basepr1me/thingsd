@@ -62,7 +62,7 @@ struct thingsd	*thingsd_env;
 static struct privsep_proc procs[] = {
 	{ "control",	PROC_CONTROL,	thingsd_dispatch_control, control },
 	{ "things",	PROC_THINGS,	thingsd_dispatch_things, things,
-		things_shutdown },
+	    things_shutdown },
 };
 
 /* For the privileged process */
@@ -73,10 +73,12 @@ int
 thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
 	struct privsep	*ps = p->p_ps;
-	int		 res = 0, cmd = 0, verbose;
+	int		 res = 0, cmd = 0, verbose, exists = 0;
 	unsigned int	 v = 0;
 	char		 client_name[THINGSD_MAXNAME];
+	char		 thing_name[THINGSD_MAXNAME];
 	struct client	*client;
+	struct thing	*thing;
 
 	switch (imsg->hdr.type) {
 	case IMSG_SHOW_PACKETS_END_DATA:
@@ -89,7 +91,19 @@ thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 		IMSG_SIZE_CHECK(imsg, &v);
 		if (imsg->data == NULL)
 			break;
-		things_echo_pkt(ps, imsg);
+		memcpy(thing_name, imsg->data, sizeof(thing_name));
+		TAILQ_FOREACH(thing, thingsd_env->things, entry) {
+			if (strcmp(thing->name, thing_name) == 0) {
+				things_echo_pkt(ps, imsg);
+				exists = 1;
+				break;
+			}
+		}
+		if (!exists)
+			if (proc_compose_imsg(ps, PROC_CONTROL, -1, 
+			    IMSG_BAD_THING,
+			    imsg->hdr.peerid, -1, &res, sizeof(res)) == -1)
+				return (-1);
 		break;
 	case IMSG_KILL_CLIENT:
 		IMSG_SIZE_CHECK(imsg, &v);
@@ -219,7 +233,7 @@ main(int argc, char **argv)
 	log_init(1, LOG_DAEMON);
 
 	if ((env = calloc(1, sizeof(*env))) == NULL)
-		fatal("calloc: env");
+		fatal("%s: calloc", __func__);
 
 	thingsd_env = env;
 

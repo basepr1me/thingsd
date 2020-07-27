@@ -73,8 +73,13 @@ int
 control_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
 	struct ctl_conn		*c;
+	struct privsep		*ps = p->p_ps;
+	struct control_sock	 cs = ps->ps_csock;
+	int			 bad = 0;
 
 	switch (imsg->hdr.type) {
+	case IMSG_BAD_THING:
+		bad = 1;
 	case IMSG_SHOW_PACKETS_DATA:
 	case IMSG_SHOW_PACKETS_END_DATA:
 	case IMSG_GET_INFO_PARENT_DATA:
@@ -90,6 +95,12 @@ control_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 			    __func__, imsg->hdr.peerid);
 			return (-1);
 		}
+
+		if (bad) {
+			control_close(ps, imsg, imsg->hdr.peerid, &cs);
+			break;
+		}
+
 		imsg_compose_event(&c->iev, imsg->hdr.type,
 		    0, 0, -1, imsg->data, IMSG_DATA_SIZE(imsg));
 		break;

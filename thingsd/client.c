@@ -67,7 +67,7 @@ client_conn(int fd, short event, void *arg)
 	*client->sub_names = (char *) calloc(env->max_subs,
 	    sizeof(client->sub_names));
 	if (*client->sub_names == NULL)
-		fatalx("calloc client->sub_names");
+		goto err;
 
 	/*  check for unlimited clients */
 	sock->client_cnt++;

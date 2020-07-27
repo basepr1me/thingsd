@@ -1124,11 +1124,11 @@ pushbuff(u_char *pkt)
 	struct file	*bfile;
 
 	if ((bfile = calloc(1, sizeof(struct file))) == NULL) {
-		log_warn("malloc");
+		log_warn("calloc");
 		return (NULL);
 	}
 	if ((bfile->name = strdup("subscribe buffer")) == NULL) {
-		log_warn("malloc");
+		log_warn("strdup");
 		free(bfile);
 		return (NULL);
 	}
@@ -1265,7 +1265,7 @@ cmdline_symset(char *s)
 
 	len = strlen(s) - strlen(val) + 1;
 	if ((sym = malloc(len)) == NULL)
-		errx(1, "cmdline_symset: malloc");
+		fatal("%s: malloc", __func__);
 
 	strlcpy(sym, s, len);
 
@@ -1322,7 +1322,7 @@ conf_new_thing(char *name)
 
 	thing = calloc(1, sizeof(*thing));
 	if (thing == NULL)
-		errx(1, "get_thing: calloc");
+		fatal("%s: calloc", __func__);
 	n = strlcpy(thing->name, name, sizeof(thing->name));
 	if (n >= sizeof(thing->name))
 		fatalx("%s: thing->name too long", __func__);

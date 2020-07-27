@@ -384,10 +384,10 @@ new_socket(int port)
 	struct socket		*sock;
 
 	if ((sock = calloc(1, sizeof(*sock))) == NULL)
-		fatalx("no sock calloc");
+		fatal("%s: calloc", __func__);
 
 	if ((sock->ev = calloc(1, sizeof(*sock->ev))) == NULL)
-		fatalx("no sock->ev calloc");
+		fatal("%s: calloc", __func__);
 
 	sock->port = port;
 
