@@ -215,6 +215,13 @@ things_reset(void)
 	struct thing		*thing, *tthing;
 	struct socket		*sock, *tsock;
 	struct client		*client, *tclient;
+	struct packet_client	*packet_client, *tpacket_client;
+
+	/* clean up packet clients */
+	TAILQ_FOREACH_SAFE(packet_client, thingsd_env->packet_clients, entry,
+	    tpacket_client) {
+		TAILQ_REMOVE(thingsd_env->packet_clients, packet_client, entry);
+	}
 
 	/* clean up clients */
 	TAILQ_FOREACH_SAFE(client, thingsd_env->clients, entry, tclient) {
@@ -246,7 +253,15 @@ things_shutdown(void)
 	struct thing		*thing, *tthing;
 	struct socket		*sock, *tsock;
 	struct client		*client, *tclient;
-	struct dead_thing	*dead_thing, *dead_tthing;
+	struct dead_thing	*dead_thing, *tdead_thing;
+	struct packet_client	*packet_client, *tpacket_client;
+
+	/* clean up packet clients */
+	TAILQ_FOREACH_SAFE(packet_client, thingsd_env->packet_clients, entry,
+	    tpacket_client) {
+		TAILQ_REMOVE(thingsd_env->packet_clients, packet_client, entry);
+		free(packet_client);
+	}
 
 	/* clean up things */
 	TAILQ_FOREACH_SAFE(thing, thingsd_env->things, entry, tthing) {
@@ -257,7 +272,7 @@ things_shutdown(void)
 
 	/* clean up dead things */
 	TAILQ_FOREACH_SAFE(dead_thing,
-	    thingsd_env->dead_things->dead_things_list, entry, dead_tthing) {
+	    thingsd_env->dead_things->dead_things_list, entry, tdead_thing) {
 		TAILQ_REMOVE(thingsd_env->dead_things->dead_things_list,
 		    dead_thing, entry);
 		free(dead_thing);

@@ -31,8 +31,7 @@
 #include "proc.h"
 #include "thingsd.h"
 
-extern void bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t,
-    void *);
+void bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t, void *);
 
 void
 client_conn(int fd, short event, void *arg)
