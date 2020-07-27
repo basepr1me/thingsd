@@ -349,7 +349,8 @@ client_wr_things(struct client *client, struct thing *thing, size_t len)
 			thing->fd = -1;
 		} else {
 			if (thing->fd != -1) {
-				bufferevent_write_buffer(thing->bev, client->evb);
+				bufferevent_write_buffer(thing->bev,
+				    client->evb);
 				evbuffer_drain(client->evb, len);
 			}
 		}

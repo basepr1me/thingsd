@@ -305,6 +305,7 @@ things_echo_pkt(struct privsep *ps, struct imsg *imsg)
 	struct packet_client	*packet_client;
 
 	packet_client = calloc(1, sizeof(*packet_client));
+
 	if (packet_client == NULL)
 		fatalx("no calloc packet_client");
 
@@ -312,9 +313,11 @@ things_echo_pkt(struct privsep *ps, struct imsg *imsg)
 
 	packet_client->ps = *ps;
 	packet_client->imsg = *imsg;
+
 	memcpy(packet_client->name, imsg->data,  sizeof(packet_client->name));
 
 	log_debug("control packet echo request for %s", packet_client->name);
+
 	TAILQ_INSERT_TAIL(thingsd_env->packet_clients, packet_client, entry);
 }
 
@@ -363,7 +366,6 @@ things_show_info(struct privsep *ps, struct imsg *imsg)
 				    imsg->hdr.peerid, -1, &nti,
 				    sizeof(nti)) == -1)
 					return;
-
 			}
 		}
 
@@ -562,7 +564,5 @@ send_to_packet_client(struct thingsd *env, char *name, char *pkt, int len)
 				    packet_client->imsg.hdr.peerid, -1,
 				    pkt, len) == -1)
 				return;
-
-
 	}
 }

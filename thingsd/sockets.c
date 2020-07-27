@@ -161,7 +161,6 @@ recreate:
 
 		if (csock == -1 || conn_csock == -1)
 			fatalx("socket creation failed");
-
 		else if (csock == -2 || conn_csock == -2) {
 			fail = true;
 
@@ -242,6 +241,7 @@ create_socket(int iport, char *iface, int type)
 			fatalx("setsockopt error");
 
 		}
+
 		/* non-blocking */
 		flags = fcntl(socket_fd, F_GETFL);
 		flags |= O_NONBLOCK;
@@ -446,7 +446,6 @@ socket_rd(struct bufferevent *bev, void *arg)
 
 			free(pkt);
 			pkt = NULL;
-
 		}
 	}
 	free(pkt);
