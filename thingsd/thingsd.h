@@ -24,9 +24,9 @@
 #define dprintf(x...)
 #endif /* THINGSD_DEBUG */
 
-#define THINGSD_CONF		"/etc/thingsd.conf"
-#define	THINGSD_SOCKET		"/var/run/thingsd.sock"
-#define THINGSD_USER		"_thingsd"
+#define THINGSD_CONF		 "/etc/thingsd.conf"
+#define THINGSD_SOCKET		 "/var/run/thingsd.sock"
+#define THINGSD_USER		 "_thingsd"
 
 #define CONN_RETRY		 30
 #define MIN_RETRY		 10

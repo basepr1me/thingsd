@@ -93,16 +93,15 @@ static int		 errors;
 static struct thing	*new_thing;
 
 const int		 baudrates[18] = {50, 75, 110, 134, 150, 200,
-			     300, 600, 1200, 1800, 2400, 4800, 9600,
-			     38400, 57600, 76800, 115200};
+			    300, 600, 1200, 1800, 2400, 4800, 9600,
+			    38400, 57600, 76800, 115200};
 const char		*parity[4] = {"none", "odd", "even", "space"};
 struct client		*client, *tclient;
 char			 my_name[THINGSD_MAXTEXT];
 int			 my_fd, pkt_len;
 size_t			 pn;
 
-struct thing	*conf_new_thing(char *);
-void		*conf_del_thing(struct thing *);
+struct thing		*conf_new_thing(char *);
 
 typedef struct {
 	union {

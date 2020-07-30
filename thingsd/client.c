@@ -51,10 +51,13 @@ client_conn(int fd, short event, void *arg)
 
 	if ((client = calloc(1, sizeof(*client))) == NULL)
 		goto err;
+
 	if ((client->ev = calloc(1, sizeof(*client->ev))) == NULL)
 		goto err;
+
 	if ((sock = get_socket(env, fd)) == NULL)
 		goto err;
+
 	if (sock->tls) {
 		if (tls_accept_socket(sock->tls_ctx, &client->tls_ctx,
 		    client_fd) == -1) {
@@ -333,6 +336,7 @@ client_wr_things(struct client *client, struct thing *thing, size_t len)
 
 	if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
 		return;
+
 	switch (thing->type) {
 	case TCP:
 	case DEV:
@@ -343,6 +347,7 @@ client_wr_things(struct client *client, struct thing *thing, size_t len)
 				    " failed", __func__);
 				return;
 			}
+
 			evbuffer_remove(client->evb, pkt, len);
 			write(thing->fd, pkt, len);
 			close(thing->fd);
@@ -388,12 +393,14 @@ client_tls_writecb(int fd, short event, void *arg)
 		ret = tls_write(client->tls_ctx,
 		    EVBUFFER_DATA(bufev->output),
 		    EVBUFFER_LENGTH(bufev->output));
+
 		if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) {
 			goto retry;
 		} else if (ret < 0) {
 			towrite |= EVBUFFER_ERROR;
 			goto err;
 		}
+
 		len = ret;
 		evbuffer_drain(bufev->output, len);
 	}
@@ -473,6 +480,7 @@ start_client_chk(struct thingsd *env)
 
 	rclient_chk = pthread_create(&tclient_chk, NULL, client_chk,
 	    (void *)env);
+
 	if (rclient_chk) {
 		log_warnx("%s: thread creation failed", __func__);
 		client_chk((void *) env);
