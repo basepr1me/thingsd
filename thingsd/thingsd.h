@@ -246,9 +246,6 @@ struct thingsd {
 
 	/* things */
 	struct event_base	*things_eb;
-	struct event		 things_evsigquit;
-	struct event		 things_evsigterm;
-	struct event		 things_evsigint;
 
 	/* control packets */
 	struct packetclientlist	*packet_clients;
