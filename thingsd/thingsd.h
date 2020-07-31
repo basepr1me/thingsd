@@ -275,7 +275,7 @@ void	 client_wr_things(struct client *, struct thing *, size_t);
 void	 client_tls_readcb(int, short, void *);
 void	 client_tls_writecb(int, short, void *);
 void	 clients_show_info(struct privsep *, struct imsg *);
-void	 client_paused(int, short, void *);
+void	 client_accept_paused(int, short, void *);
 
 /* serial.c */
 void	 open_things(struct thingsd *, bool);

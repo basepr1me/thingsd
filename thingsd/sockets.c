@@ -192,7 +192,7 @@ recreate:
 			    client_conn, env);
 			if (event_add(sock->ev, NULL))
 				fatalx("event add sock");
-			evtimer_set(&env->pause, client_paused, env);
+			evtimer_set(&env->pause, client_accept_paused, env);
 		}
 
 		if (conn_socket != NULL && conn_socket->fd > 0) {

@@ -61,7 +61,7 @@ accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
 }
 
 void
-client_paused(int fd, short events, void *arg)
+client_accept_paused(int fd, short events, void *arg)
 {
 	struct thingsd		*env = arg;
 	event_add(env->ev, NULL);
