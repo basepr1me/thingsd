@@ -299,6 +299,7 @@ things_shutdown(void)
 		TAILQ_REMOVE(thingsd_env->clients, client, entry);
 		free(client);
 	}
+	free(thingsd_env);
 }
 
 void

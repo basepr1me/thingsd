@@ -420,7 +420,7 @@ void
 thingsd_shutdown(void)
 {
 	proc_kill(&thingsd_env->thingsd_ps);
-	free(thingsd_env);
+	things_shutdown();
 
 	log_warnx("parent terminating");
 	exit(0);
@@ -462,8 +462,6 @@ thingsd_configure_things(struct privsep *ps)
 
 	/* Send configured things to things. */
 	TAILQ_FOREACH(thing, thingsd_env->things, entry) {
-		memset(&nti, 0, sizeof(nti));
-
 		nti.exists = thing->exists;
 		nti.hw_ctl = thing->hw_ctl;
 		nti.persist = thing->persist;
