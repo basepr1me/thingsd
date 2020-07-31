@@ -90,15 +90,16 @@ create_sockets(struct thingsd *env, bool reconn)
 			thing->type = UDP;
 			conn_socket = new_socket(thing->rcv_port);
 
-			if ((csock = sock->fd = create_socket(thing->port,
-			    iface, TCP)) == -1)
+			csock = sock->fd = create_socket(thing->port,
+			    iface, TCP);
+			if (csock == -1)
 				log_warnx("udp create socket failed");
 			else
 				thing->exists = true;
 
-			if ((conn_csock = conn_socket->fd =
-			    create_socket(thing->rcv_port, iface,
-		 	    thing->type)) == -1)
+			conn_csock = conn_socket->fd =
+			    create_socket(thing->rcv_port, iface, thing->type);
+			if (conn_csock == -1)
 				log_warnx("udp create socket failed");
 			else
 				thing->exists = true;
@@ -110,9 +111,9 @@ recreate:
 			thing->type = TCP;
 
 			if (thing->persist == 1) {
-				if ((thing->fd =
-				    open_client_socket(thing->ipaddr,
-				    thing->conn_port)) == -1) {
+				thing->fd = open_client_socket(thing->ipaddr,
+				    thing->conn_port);
+				if (thing->fd == -1) {
 					log_warnx("ipaddr connection failed");
 					if (reconn)
 						continue;
@@ -141,9 +142,9 @@ recreate:
 				thing->fd = -1;
 
 			if (reconn == false) {
-				if ((csock = sock->fd =
-				    create_socket(thing->port, iface,
-				    TCP)) == -1) {
+				csock = sock->fd = create_socket(thing->port,
+				    iface, TCP);
+				if (csock == -1) {
 					log_warnx("tcp create socket failed");
 					thing->exists = false;
 					add_reconn(thing);
@@ -191,6 +192,7 @@ recreate:
 			    client_conn, env);
 			if (event_add(sock->ev, NULL))
 				fatalx("event add sock");
+			evtimer_set(&env->pause, client_paused, env);
 		}
 
 		if (conn_socket != NULL && conn_socket->fd > 0) {
@@ -226,13 +228,15 @@ create_socket(int iport, char *iface, int type)
 		addr_hints.ai_flags |= AI_PASSIVE;
 		break;
 	}
-	if ((gai = getaddrinfo(iface, port, &addr_hints, &addr_res)) != 0)
+	gai = getaddrinfo(iface, port, &addr_hints, &addr_res);
+	if (gai != 0)
 		fatalx("getaddrinfo failed on %s: %s:%s", gai_strerror(gai),
 		    iface, port);
 	for (loop_res = addr_res; loop_res != NULL;
 	    loop_res = loop_res->ai_next) {
-		if ((socket_fd = socket(loop_res->ai_family,
-		    loop_res->ai_socktype, loop_res->ai_protocol)) == -1)
+		socket_fd = socket(loop_res->ai_family, loop_res->ai_socktype,
+		    loop_res->ai_protocol);
+		if (socket_fd == -1)
 			fatalx("unable to create socket");
 
 		if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &o_val,
@@ -383,10 +387,12 @@ new_socket(int port)
 {
 	struct socket		*sock;
 
-	if ((sock = calloc(1, sizeof(*sock))) == NULL)
+	sock = calloc(1, sizeof(*sock));
+	if (sock == NULL)
 		fatal("%s: calloc", __func__);
 
-	if ((sock->ev = calloc(1, sizeof(*sock->ev))) == NULL)
+	sock->ev = calloc(1, sizeof(*sock->ev));
+	if (sock->ev == NULL)
 		fatal("%s: calloc", __func__);
 
 	sock->port = port;
@@ -426,7 +432,8 @@ socket_rd(struct bufferevent *bev, void *arg)
 
 			len = EVBUFFER_LENGTH(thing->evb);
 
-			if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
+			pkt = calloc(len, sizeof(*pkt));
+			if (pkt == NULL)
 				return;
 
 			evbuffer_remove(thing->evb, pkt, len);

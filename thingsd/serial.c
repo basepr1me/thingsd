@@ -213,7 +213,8 @@ open_things(struct thingsd *env, bool reconn)
 				/* Set the new options for the port */
 				tcsetattr(fd, TCSANOW, &s_opts);
 
-				if ((thing->fd = fd) == '\0') {
+				thing->fd = fd;
+				if (thing->fd == '\0') {
 					log_warnx("serial device not opened");
 					if (reconn)
 						return;

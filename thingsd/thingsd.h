@@ -102,8 +102,8 @@ struct thingsd_parent_info {
 
 struct client {
 	TAILQ_ENTRY(client)	 entry;
-	struct event		*ev;
 	struct evbuffer		*evb;
+	struct event		*ev;
 	struct bufferevent	*bev;
 	struct socket		*socket;
 	bool			 subscribed;
@@ -250,6 +250,10 @@ struct thingsd {
 	/* control packets */
 	struct packetclientlist	*packet_clients;
 	int			 packet_client_count;
+
+	/* client accept */
+	struct event		*ev;
+	struct event		 pause;
 };
 
 extern struct thingsd	*thingsd_env;
@@ -271,6 +275,7 @@ void	 client_wr_things(struct client *, struct thing *, size_t);
 void	 client_tls_readcb(int, short, void *);
 void	 client_tls_writecb(int, short, void *);
 void	 clients_show_info(struct privsep *, struct imsg *);
+void	 client_paused(int, short, void *);
 
 /* serial.c */
 void	 open_things(struct thingsd *, bool);

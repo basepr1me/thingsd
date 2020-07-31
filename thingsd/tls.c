@@ -44,15 +44,17 @@ tls_load_keypair(struct thing *thing)
 	if (thing->tls == false)
 		return (0);
 
-	if ((thing->tls_cert = tls_load_file(thing->tls_cert_file,
-	    &thing->tls_cert_len, NULL)) == NULL)
+	thing->tls_cert = tls_load_file(thing->tls_cert_file,
+	    &thing->tls_cert_len, NULL);
+	if (thing->tls_cert == NULL)
 		return (-1);
 
 	log_debug("%s: using certificate %s", __func__, thing->tls_cert_file);
 
 	/* XXX allow to specify password for encrypted key */
-	if ((thing->tls_key = tls_load_file(thing->tls_key_file,
-	    &thing->tls_key_len, NULL)) == NULL)
+	thing->tls_key = tls_load_file(thing->tls_key_file,
+	    &thing->tls_key_len, NULL);
+	if (thing->tls_key == NULL)
 		return (-1);
 
 	log_debug("%s: using private key %s", __func__, thing->tls_key_file);
@@ -67,8 +69,9 @@ tls_load_ca(struct thing *thing)
 	    strlen(thing->tls_ca_file) == 0)
 		return (0);
 
-	if ((thing->tls_ca = tls_load_file(thing->tls_ca_file,
-	    &thing->tls_ca_len, NULL)) == NULL)
+	thing->tls_ca = tls_load_file(thing->tls_ca_file,
+	    &thing->tls_ca_len, NULL);
+	if (thing->tls_ca == NULL)
 		return (-1);
 
 	log_debug("%s: using ca cert(s) from %s", __func__, thing->tls_ca_file);
@@ -85,9 +88,10 @@ tls_load_ocsp(struct thing *thing)
 	if (strlen(thing->tls_ocsp_staple_file) == 0)
 		return (0);
 
-	if ((thing->tls_ocsp_staple = tls_load_file(
+	thing->tls_ocsp_staple = tls_load_file(
 	    thing->tls_ocsp_staple_file,
-	    &thing->tls_ocsp_staple_len, NULL)) == NULL) {
+	    &thing->tls_ocsp_staple_len, NULL);
+	if (thing->tls_ocsp_staple == NULL) {
 		log_warnx("%s: Failed to load ocsp staple from %s", __func__,
 		    thing->tls_ocsp_staple_file);
 		return (-1);
@@ -112,8 +116,9 @@ tls_load_crl(struct thing *thing)
 	    strlen(thing->tls_crl_file) == 0)
 		return (0);
 
-	if ((thing->tls_crl = tls_load_file(thing->tls_crl_file,
-	    &thing->tls_crl_len, NULL)) == NULL)
+	thing->tls_crl = tls_load_file(thing->tls_crl_file,
+	    &thing->tls_crl_len, NULL);
+	if (thing->tls_crl == NULL)
 		return (-1);
 
 	log_debug("%s: using crl(s) from %s", __func__, thing->tls_crl_file);
@@ -141,12 +146,14 @@ socket_tls_init(struct socket *socket, struct thing *thing)
 		return (-1);
 	}
 
-	if ((socket->tls_config = tls_config_new()) == NULL) {
+	socket->tls_config = tls_config_new();
+	if (socket->tls_config == NULL) {
 		log_warnx("%s: failed to get tls config", __func__);
 		return (-1);
 	}
 
-	if ((socket->tls_ctx = tls_server()) == NULL) {
+	socket->tls_ctx = tls_server();
+	if (socket->tls_ctx == NULL) {
 		log_warnx("%s: failed to get tls server", __func__);
 		return (-1);
 	}

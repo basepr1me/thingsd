@@ -232,7 +232,8 @@ main(int argc, char **argv)
 	/* log to stderr until daemonized */
 	log_init(1, LOG_DAEMON);
 
-	if ((env = calloc(1, sizeof(*env))) == NULL)
+	env = calloc(1, sizeof(*env));
+	if (env == NULL)
 		fatal("%s: calloc", __func__);
 
 	thingsd_env = env;
@@ -292,7 +293,8 @@ main(int argc, char **argv)
 	if (config_init(env) == -1)
 		fatal("failed to initialize configuration");
 
-	if ((ps->ps_pw = getpwnam(THINGSD_USER)) == NULL)
+	ps->ps_pw = getpwnam(THINGSD_USER);
+	if (ps->ps_pw == NULL)
 		fatal("unknown user %s", THINGSD_USER);
 
 	env->thingsd_conffile = conffile;

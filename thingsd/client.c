@@ -31,31 +31,84 @@
 #include "proc.h"
 #include "thingsd.h"
 
+#define FD_RESERVE		5
+#define FD_NEEDED		6
+
+int cgi_inflight = 0;
+
+int		 accept_reserve(int, struct sockaddr *, socklen_t *, int,
+		    volatile int *);
 void bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t, void *);
+
+int
+accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
+    int reserve, volatile int *counter)
+{
+	int ret;
+	if (getdtablecount() + reserve +
+	    ((*counter + 1) * FD_NEEDED) >= getdtablesize()) {
+		log_debug("inflight fds exceeded");
+		errno = EMFILE;
+		return -1;
+	}
+
+	if ((ret = accept4(sockfd, addr, addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC))
+	    > -1) {
+		(*counter)++;
+		log_debug("inflight incremented, now %d", *counter);
+	}
+	return ret;
+}
+
+void
+client_paused(int fd, short events, void *arg)
+{
+	struct thingsd		*env = arg;
+	event_add(env->ev, NULL);
+}
 
 void
 client_conn(int fd, short event, void *arg)
 {
 	struct sockaddr_storage	 ss;
-	struct client		*client;
+	struct timeval		 backoff;
+	struct client		*client = NULL;
 	struct thingsd		*env = (struct thingsd *)arg;
 	struct socket		*sock = NULL;
 	int			 client_fd;
 	socklen_t		 len = sizeof(ss);
 
-	if ((client_fd = accept4(fd, (struct sockaddr *)&ss, &len,
-	    SOCK_NONBLOCK)) == -1) {
-		log_warnx("client accept failed");
-		return;
+	backoff.tv_sec = 1;
+	backoff.tv_usec = 0;
+
+	client_fd = accept_reserve(fd, (struct sockaddr *)&ss, &len, FD_RESERVE,
+	    &cgi_inflight);
+	if (client_fd == -1) {
+		switch (errno) {
+		case EINTR:
+		case EWOULDBLOCK:
+		case ECONNABORTED:
+			return;
+		case EMFILE:
+		case ENFILE:
+			event_del(env->ev);
+			evtimer_add(&env->pause, &backoff);
+			return;
+		default:
+			log_warnx("client accept failed");
+		}
 	}
 
-	if ((client = calloc(1, sizeof(*client))) == NULL)
+	client = calloc(1, sizeof(*client));
+	if (client == NULL)
 		goto err;
 
-	if ((client->ev = calloc(1, sizeof(*client->ev))) == NULL)
+	client->ev = calloc(1, sizeof(*client->ev));
+	if (client->ev == NULL)
 		goto err;
 
-	if ((sock = get_socket(env, fd)) == NULL)
+	sock = get_socket(env, fd);
+	if (sock == NULL)
 		goto err;
 
 	if (sock->tls) {
@@ -116,6 +169,7 @@ client_conn(int fd, short event, void *arg)
 	return;
 err:
 	log_debug("%s: client error", __func__);
+	cgi_inflight--;
 	if (client_fd != -1)
 		close(client_fd);
 	if (sock->tls)
@@ -227,10 +281,12 @@ client_rd(struct bufferevent *bev, void *arg)
 
 	if (client->subscribed == false) {
 		/* allow one shot at subscription so we don't get hammered */
-		if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
+		pkt = calloc(len, sizeof(*pkt));
+		if (pkt == NULL)
 			return;
 
-		if ((npkt = calloc(len, sizeof(*npkt))) == NULL)
+		npkt = calloc(len, sizeof(*npkt));
+		if (npkt == NULL)
 			return;
 
 		bufferevent_disable(client->bev, EV_READ);
@@ -334,15 +390,17 @@ client_wr_things(struct client *client, struct thing *thing, size_t len)
 {
 	char			*pkt;
 
-	if ((pkt = calloc(len, sizeof(*pkt))) == NULL)
+	pkt = calloc(len, sizeof(*pkt));
+	if (pkt == NULL)
 		return;
 
 	switch (thing->type) {
 	case TCP:
 	case DEV:
 		if (thing->persist == false) {
-			if ((thing->fd = open_client_socket(thing->ipaddr,
-			    thing->conn_port)) == -1) {
+			thing->fd = open_client_socket(thing->ipaddr,
+			    thing->conn_port);
+			if (thing->fd == -1) {
 				log_warnx("%s: temporary ipaddr connection"
 				    " failed", __func__);
 				return;

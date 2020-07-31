@@ -559,12 +559,14 @@ send_to_packet_client(struct thingsd *env, char *name, char *pkt, int len)
 	int			 snm;
 
 	TAILQ_FOREACH(packet_client, env->packet_clients, entry) {
-		if (strlen(packet_client->name) != 0)
-			if ((snm = strcmp(name, packet_client->name)) == 0)
+		if (strlen(packet_client->name) != 0) {
+			snm = strcmp(name, packet_client->name);
+			if (snm == 0)
 				if (proc_compose_imsg(&packet_client->ps,
 				    PROC_CONTROL, -1, IMSG_SHOW_PACKETS_DATA,
 				    packet_client->imsg.hdr.peerid, -1,
 				    pkt, len) == -1)
 				return;
+		}
 	}
 }

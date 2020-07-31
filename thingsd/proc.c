@@ -303,8 +303,9 @@ proc_setup(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc)
 
 		id = procs[src].p_id;
 		ps->ps_title[id] = procs[src].p_title;
-		if ((ps->ps_ievs[id] = calloc(ps->ps_instances[id],
-		    sizeof(struct imsgev))) == NULL)
+		ps->ps_ievs[id] = calloc(ps->ps_instances[id],
+		    sizeof(struct imsgev));
+		if (ps->ps_ievs[id] == NULL)
 			fatal("%s: calloc", __func__);
 
 		/* With this set up, we are ready to call imsg_init(). */
@@ -331,8 +332,9 @@ proc_setup(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc)
 	 */
 	for (src = 0; src < PROC_MAX; src++) {
 		/* Allocate destination array for each process */
-		if ((ps->ps_pipes[src] = calloc(ps->ps_instances[src],
-		    sizeof(struct privsep_pipes))) == NULL)
+		ps->ps_pipes[src] = calloc(ps->ps_instances[src],
+		    sizeof(struct privsep_pipes));
+		if (ps->ps_pipes[src] == NULL)
 			fatal("%s: calloc", __func__);
 
 		for (i = 0; i < ps->ps_instances[src]; i++) {
@@ -340,9 +342,10 @@ proc_setup(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc)
 
 			for (dst = 0; dst < PROC_MAX; dst++) {
 				/* Allocate maximum fd integers */
-				if ((pp->pp_pipes[dst] =
+				pp->pp_pipes[dst] =
 				    calloc(ps->ps_instances[dst],
-				    sizeof(int))) == NULL)
+				    sizeof(int));
+				if (pp->pp_pipes[dst] == NULL)
 					fatal("%s: calloc", __func__);
 
 				/* Mark fd as unused */
@@ -613,7 +616,8 @@ proc_dispatch(int fd, short event, void *arg)
 	ibuf = &iev->ibuf;
 
 	if (event & EV_READ) {
-		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
+		n = imsg_read(ibuf);
+		if (n == -1 && errno != EAGAIN)
 			fatal("%s: imsg_read", __func__);
 		if (n == 0) {
 			/* this pipe is dead, so remove the event handler */
@@ -624,7 +628,8 @@ proc_dispatch(int fd, short event, void *arg)
 	}
 
 	if (event & EV_WRITE) {
-		if ((n = msgbuf_write(&ibuf->w)) == -1 && errno != EAGAIN)
+		n = msgbuf_write(&ibuf->w);
+		if (n == -1 && errno != EAGAIN)
 			fatal("%s: msgbuf_write", __func__);
 		if (n == 0) {
 			/* this pipe is dead, so remove the event handler */
@@ -635,7 +640,8 @@ proc_dispatch(int fd, short event, void *arg)
 	}
 
 	for (;;) {
-		if ((n = imsg_get(ibuf, &imsg)) == -1)
+		n = imsg_get(ibuf, &imsg);
+		if (n == -1)
 			fatal("%s: imsg_get", __func__);
 		if (n == 0)
 			break;
@@ -716,8 +722,8 @@ imsg_compose_event(struct imsgev *iev, uint16_t type, uint32_t peerid,
 {
 	int	ret;
 
-	if ((ret = imsg_compose(&iev->ibuf, type, peerid,
-	    pid, fd, data, datalen)) == -1)
+	ret = imsg_compose(&iev->ibuf, type, peerid, pid, fd, data, datalen);
+	if (ret == -1)
 		return (ret);
 	imsg_event_add(iev);
 	return (ret);
@@ -729,8 +735,8 @@ imsg_composev_event(struct imsgev *iev, uint16_t type, uint32_t peerid,
 {
 	int	ret;
 
-	if ((ret = imsg_composev(&iev->ibuf, type, peerid,
-	    pid, fd, iov, iovcnt)) == -1)
+	ret = imsg_composev(&iev->ibuf, type, peerid, pid, fd, iov, iovcnt);
+	if (ret == -1)
 		return (ret);
 	imsg_event_add(iev);
 	return (ret);
@@ -829,7 +835,8 @@ proc_flush_imsg(struct privsep *ps, enum privsep_procid id, int n)
 
 	proc_range(ps, id, &n, &m);
 	for (; n < m; n++) {
-		if ((ibuf = proc_ibuf(ps, id, n)) == NULL)
+		ibuf = proc_ibuf(ps, id, n);
+		if (ibuf == NULL)
 			return (-1);
 		do {
 			ret = imsg_flush(ibuf);

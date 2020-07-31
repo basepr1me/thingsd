@@ -90,7 +90,8 @@ control_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_GET_INFO_CLIENTS_END_DATA:
 	case IMSG_GET_INFO_SOCKETS_DATA:
 	case IMSG_GET_INFO_SOCKETS_END_DATA:
-		if ((c = control_connbyfd(imsg->hdr.peerid)) == NULL) {
+		c = control_connbyfd(imsg->hdr.peerid);
+		if (c == NULL) {
 			log_warnx("%s: fd %d: not found",
 			    __func__, imsg->hdr.peerid);
 			return (-1);
@@ -123,7 +124,8 @@ control_init(struct privsep *ps, struct control_sock *cs)
 	if (cs->cs_name == NULL)
 		return (0);
 
-	if ((fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0)) == -1) {
+	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+	if (fd == -1) {
 		log_warn("%s: socket", __func__);
 		return (-1);
 	}
@@ -213,12 +215,13 @@ control_accept(int listenfd, short event, void *arg)
 	struct ctl_conn		*c;
 
 	event_add(&cs->cs_ev, NULL);
-	if ((event & EV_TIMEOUT))
+	if (event & EV_TIMEOUT)
 		return;
 
 	len = sizeof(sun);
-	if ((connfd = accept4(listenfd,
-	    (struct sockaddr *)&sun, &len, SOCK_NONBLOCK)) == -1) {
+	connfd = accept4(listenfd, (struct sockaddr *)&sun, &len,
+	    SOCK_NONBLOCK);
+	if (connfd == -1) {
 		/*
 		 * Pause accept if we are out of file descriptors, or
 		 * libevent will haunt us here too.
@@ -234,7 +237,8 @@ control_accept(int listenfd, short event, void *arg)
 		return;
 	}
 
-	if ((c = calloc(1, sizeof(struct ctl_conn))) == NULL) {
+	c = calloc(1, sizeof(struct ctl_conn));
+	if (c == NULL) {
 		log_warn("%s", __func__);
 		close(connfd);
 		return;
@@ -280,7 +284,8 @@ control_close(struct privsep *ps, struct imsg *imsg, int fd,
 {
 	struct ctl_conn	*c;
 
-	if ((c = control_connbyfd(fd)) == NULL) {
+	c = control_connbyfd(fd);
+	if (c == NULL) {
 		log_warn("%s: fd %d: not found", __func__, fd);
 		return;
 	}
@@ -322,14 +327,15 @@ control_dispatch_imsg(int fd, short event, void *arg)
 	if (getpeereid(fd, &euid, &egid) == -1)
 		return;
 
-	if ((c = control_connbyfd(fd)) == NULL) {
+	c = control_connbyfd(fd);
+	if (c == NULL) {
 		log_warn("%s: fd %d: not found", __func__, fd);
 		return;
 	}
 
 	if (event & EV_READ) {
-		if (((n = imsg_read(&c->iev.ibuf)) == -1 && errno != EAGAIN) ||
-		    n == 0) {
+		n = imsg_read(&c->iev.ibuf);
+		if ((n == -1 && errno != EAGAIN) || n == 0) {
 			control_close(ps, &imsg, fd, cs);
 			return;
 		}
@@ -343,7 +349,8 @@ control_dispatch_imsg(int fd, short event, void *arg)
 	}
 
 	for (;;) {
-		if ((n = imsg_get(&c->iev.ibuf, &imsg)) == -1) {
+		n = imsg_get(&c->iev.ibuf, &imsg);
+		if (n == -1) {
 			control_close(ps, &imsg, fd, cs);
 			return;
 		}

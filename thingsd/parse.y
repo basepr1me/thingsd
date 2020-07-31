@@ -179,7 +179,8 @@ dosub		: SUBSCRIBE '{' optnl subopts '}'
 include		: INCLUDE STRING		{
 			struct file	*nfile;
 
-			if ((nfile = pushfile($2, 1)) == NULL) {
+			nfile = pushfile($2, 1);
+			if (nfile == NULL) {
 				yyerror("failed to include file %s", $2);
 				free($2);
 				YYERROR;
@@ -846,7 +847,8 @@ lgetc(int quotec)
 			"quoted string");
 			return (-1);
 		}
-		if ((c = getc(file->stream)) == EOF) {
+		c = getc(file->stream);
+		if (c == EOF) {
 			yyerror("reached end of file while parsing "
 			    "quoted string");
 			if (file == topfile || popfile() == EOF)
@@ -936,7 +938,8 @@ top:
 			; /* nothing */
 	if (c == '$' && parsebuf == NULL) {
 		while (1) {
-			if ((c = lgetc(0)) == EOF)
+			c = lgetc(0);
+			if (c == EOF)
 				return (0);
 
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -966,13 +969,15 @@ top:
 	case '"':
 		quotec = c;
 		while (1) {
-			if ((c = lgetc(quotec)) == EOF)
+			c = lgetc(quotec);
+			if (c == EOF)
 				return (0);
 			if (c == '\n') {
 				file->lineno++;
 				continue;
 			} else if (c == '\\') {
-				if ((next = lgetc(quotec)) == EOF)
+				next = lgetc(quotec);
+				if (next == EOF)
 					return (0);
 				if (next == quotec || c == ' ' || c == '\t')
 					c = next;
@@ -1052,9 +1057,12 @@ nodigits:
 		} while ((c = lgetc(0)) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
-		if ((token = lookup(buf)) == STRING)
-			if ((yylval.v.string = strdup(buf)) == NULL)
+		token = lookup(buf);
+		if (token == STRING) {
+			yylval.v.string = strdup(buf);
+			if (yylval.v.string == NULL)
 				err(1, "yylex: strdup");
+		}
 		return (token);
 	}
 	if (c == '\n') {
@@ -1091,16 +1099,19 @@ pushfile(const char *name, int secret)
 {
 	struct file	*nfile;
 
-	if ((nfile = calloc(1, sizeof(struct file))) == NULL) {
+	nfile = calloc(1, sizeof(struct file));
+	if (nfile == NULL) {
 		log_warn("calloc");
 		return (NULL);
 	}
-	if ((nfile->name = strdup(name)) == NULL) {
+	nfile->name = strdup(name);
+	if (nfile->name == NULL) {
 		log_warn("strdup");
 		free(nfile);
 		return (NULL);
 	}
-	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
+	nfile->stream = fopen(nfile->name, "r");
+	if (nfile->stream == NULL) {
 		log_warn("%s", nfile->name);
 		free(nfile->name);
 		free(nfile);
@@ -1122,16 +1133,19 @@ pushbuff(u_char *pkt)
 {
 	struct file	*bfile;
 
-	if ((bfile = calloc(1, sizeof(struct file))) == NULL) {
+	bfile = calloc(1, sizeof(struct file));
+	if (bfile == NULL) {
 		log_warn("calloc");
 		return (NULL);
 	}
-	if ((bfile->name = strdup("subscribe buffer")) == NULL) {
+	bfile->name = strdup("subscribe buffer");
+	if (bfile->name == NULL) {
 		log_warn("strdup");
 		free(bfile);
 		return (NULL);
 	}
-	if ((parsebuf = pkt) == NULL) {
+	parsebuf = pkt;
+	if (parsebuf == NULL) {
 		log_warn("%s", bfile->name);
 		free(bfile->name);
 		free(bfile);
@@ -1147,7 +1161,8 @@ popfile(void)
 {
 	struct file	*prev;
 
-	if ((prev = TAILQ_PREV(file, files, entry)) != NULL)
+	prev = TAILQ_PREV(file, files, entry);
+	if (prev != NULL)
 		prev->errors += file->errors;
 
 	TAILQ_REMOVE(&files, file, entry);
@@ -1163,7 +1178,8 @@ popbuff(void)
 {
 	struct file	*prev;
 
-	if ((prev = TAILQ_PREV(file, files, entry)) != NULL)
+	prev = TAILQ_PREV(file, files, entry);
+	if (prev != NULL)
 		prev->errors += file->errors;
 	TAILQ_REMOVE(&files, file, entry);
 	free(file->name);
@@ -1232,7 +1248,8 @@ symset(const char *nam, const char *val, int persist)
 			free(sym);
 		}
 	}
-	if ((sym = calloc(1, sizeof(*sym))) == NULL)
+	sym = calloc(1, sizeof(*sym));
+	if (sym == NULL)
 		return (-1);
 
 	sym->nam = strdup(nam);
@@ -1259,11 +1276,13 @@ cmdline_symset(char *s)
 	int	 ret;
 	size_t	 len;
 
-	if ((val = strrchr(s, '=')) == NULL)
+	val = strrchr(s, '=');
+	if (val == NULL)
 		return (-1);
 
 	len = strlen(s) - strlen(val) + 1;
-	if ((sym = malloc(len)) == NULL)
+	sym = malloc(len);
+	if (sym == NULL)
 		fatal("%s: malloc", __func__);
 
 	strlcpy(sym, s, len);
@@ -1295,7 +1314,8 @@ parse_buf(struct client *pclient, u_char *pkt, int len)
 	tclient = pclient;
 	my_fd = tclient->fd;
 
-	if ((file = pushbuff(pkt)) == NULL)
+	file = pushbuff(pkt);
+	if (file == NULL)
 		return (-1);
 
 	topfile = file;
