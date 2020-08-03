@@ -848,11 +848,9 @@ lgetc(int quotec)
 			return (-1);
 		}
 		c = getc(file->stream);
-		if (c == EOF) {
+		if (c == EOF)
 			yyerror("reached end of file while parsing "
 			    "quoted string");
-			return (quotec);
-		}
 		return (c);
 	}
 
