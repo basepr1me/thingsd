@@ -56,11 +56,11 @@ static struct file {
 	char			*name;
 	int			 lineno;
 	int			 errors;
-} *file, *topfile;
-struct file	*pushfile(const char *, int);
-struct file	*pushbuff(u_char *);
-int		 popfile(void);
-int		 popbuff(void);
+} *file;
+struct file	*newfile(const char *, int);
+struct file	*newbuff(u_char *);
+static void	 closefile(struct file *);
+static void	 closebuff(struct file *);
 int		 check_file_secrecy(int, const char *);
 int		 yyparse(void);
 int		 yylex(void);
@@ -179,7 +179,7 @@ dosub		: SUBSCRIBE '{' optnl subopts '}'
 include		: INCLUDE STRING		{
 			struct file	*nfile;
 
-			nfile = pushfile($2, 1);
+			nfile = newfile($2, 1);
 			if (nfile == NULL) {
 				yyerror("failed to include file %s", $2);
 				free($2);
@@ -851,8 +851,6 @@ lgetc(int quotec)
 		if (c == EOF) {
 			yyerror("reached end of file while parsing "
 			    "quoted string");
-			if (file == topfile || popfile() == EOF)
-				return (EOF);
 			return (quotec);
 		}
 		return (c);
@@ -868,12 +866,6 @@ lgetc(int quotec)
 			yylval.lineno = file->lineno;
 			file->lineno++;
 		}
-	}
-
-	while (c == EOF) {
-		if (file == topfile || popfile() == EOF)
-			return (EOF);
-		c = getc(file->stream);
 	}
 
 	parseindex = 0;
@@ -1095,7 +1087,7 @@ check_file_secrecy(int fd, const char *fname)
 }
 
 struct file *
-pushfile(const char *name, int secret)
+newfile(const char *name, int secret)
 {
 	struct file	*nfile;
 
@@ -1124,12 +1116,11 @@ pushfile(const char *name, int secret)
 		return (NULL);
 	}
 	nfile->lineno = 1;
-	TAILQ_INSERT_TAIL(&files, nfile, entry);
 	return (nfile);
 }
 
 struct file *
-pushbuff(u_char *pkt)
+newbuff(u_char *pkt)
 {
 	struct file	*bfile;
 
@@ -1152,40 +1143,22 @@ pushbuff(u_char *pkt)
 		return (NULL);
 	}
 	bfile->lineno = 1;
-	TAILQ_INSERT_TAIL(&files, bfile, entry);
 	return (bfile);
 }
 
-int
-popfile(void)
+static void
+closefile(struct file *xfile)
 {
-	struct file	*prev;
-
-	prev = TAILQ_PREV(file, files, entry);
-	if (prev != NULL)
-		prev->errors += file->errors;
-
-	TAILQ_REMOVE(&files, file, entry);
-	fclose(file->stream);
-	free(file->name);
-	free(file);
-	file = prev;
-	return (file ? 0 : EOF);
+	fclose(xfile->stream);
+	free(xfile->name);
+	free(xfile);
 }
 
-int
-popbuff(void)
+static void
+closebuff(struct file *xfile)
 {
-	struct file	*prev;
-
-	prev = TAILQ_PREV(file, files, entry);
-	if (prev != NULL)
-		prev->errors += file->errors;
-	TAILQ_REMOVE(&files, file, entry);
-	free(file->name);
-	free(file);
-	file = prev;
-	return (file ? 0 : EOF);
+	free(xfile->name);
+	free(xfile);
 }
 
 int
@@ -1193,12 +1166,11 @@ parse_config(const char *filename)
 {
 	struct sym	*sym, *next;
 
-	file = pushfile(filename, 0);
+	file = newfile(filename, 0);
 	if (file == NULL) {
 		log_warn("failed to open %s", filename);
 		return (0);
 	}
-	topfile = file;
 
 	TAILQ_INIT(thingsd_env->things);
 	thingsd_env->client_fptr = client_do_chk;
@@ -1207,8 +1179,7 @@ parse_config(const char *filename)
 
 	yyparse();
 	errors = file->errors;
-	popfile();
-
+	closefile(file);
 	/* Free macros and check which have not been used. */
 	TAILQ_FOREACH_SAFE(sym, &symhead, entry, next) {
 		if ((thingsd_env->thingsd_verbose > 1) && !sym->used)
@@ -1314,16 +1285,14 @@ parse_buf(struct client *pclient, u_char *pkt, int len)
 	tclient = pclient;
 	my_fd = tclient->fd;
 
-	file = pushbuff(pkt);
+	file = newbuff(pkt);
 	if (file == NULL)
 		return (-1);
 
-	topfile = file;
 	yyparse();
 	errors = file->errors;
 
-	popbuff();
-	free(file);
+	closebuff(file);
 
 	return (errors ? -1 : 0);
 }
