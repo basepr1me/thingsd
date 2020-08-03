@@ -328,7 +328,7 @@ client_tls_readcb(int fd, short event, void *arg)
 {
 	struct bufferevent	*bufev = (struct bufferevent *)arg;
 	struct thingsd		*env = bufev->cbarg;
-	struct client		*client = NULL, *tclient;
+	struct client		*client, *tclient;
 	char			 pkt[PKT_BUFF];
 	ssize_t			 ret;
 	size_t			 len;
