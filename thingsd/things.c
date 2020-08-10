@@ -296,6 +296,7 @@ things_shutdown(void)
 	TAILQ_FOREACH_SAFE(client, thingsd_env->clients, entry, tclient) {
 		close(client->fd);
 		free(*client->sub_names);
+		*client->sub_names = NULL;
 		TAILQ_REMOVE(thingsd_env->clients, client, entry);
 		free(client);
 	}
