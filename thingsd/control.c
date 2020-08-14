@@ -359,8 +359,6 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			break;
 
 		switch (imsg.hdr.type) {
-		case IMSG_SHOW_PACKETS_REQUEST:
-		case IMSG_KILL_CLIENT:
 		case IMSG_GET_INFO_PARENT_REQUEST:
 		case IMSG_GET_INFO_THINGS_REQUEST:
 		case IMSG_GET_INFO_CLIENTS_REQUEST:

@@ -114,8 +114,8 @@ main(int argc, char *argv[])
 	case LOG_BRIEF:
 	case KILL_CLIENT:
 	case SHOW_PACKETS:
-		if (geteuid() != 0)
-			errx(1, "need root privileges");
+		/* if (geteuid() != 0) */
+		/* 	errx(1, "need root privileges"); */
 		break;
 	default:
 		break;
