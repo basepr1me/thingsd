@@ -90,7 +90,8 @@ void	 clear_config(struct thingsd *xconf);
 
 static int		 errors;
 
-static struct thing	*new_thing;
+static struct thing		*new_thing;
+static struct subscription	*new_sub(char *);
 
 const int		 baudrates[18] = {50, 75, 110, 134, 150, 200,
 			    300, 600, 1200, 1800, 2400, 4800, 9600,
@@ -416,9 +417,9 @@ subopts		: {
 		;
 
 subthings	: THING '{' STRING optcomma STRING '}' optcomma {
-			struct thing	*thing;
-			bool		 fail = false;
-			size_t		 n;
+			struct thing		*thing;
+			struct subscription	*sub, *nsub;
+			bool			 fail = false;
 
 			/* check for duplicate name and subscriptions */
 			TAILQ_FOREACH(client, thingsd_env->clients, entry) {
@@ -430,49 +431,52 @@ subthings	: THING '{' STRING optcomma STRING '}' optcomma {
 						fail = true;
 						log_warnx("client exists");
 					}
-					for (n = 0; n < client->le; n++)
-						if (strcmp(client->sub_names[n],
+					TAILQ_FOREACH(sub,
+					    client->subscriptions, entry)
+						if (strcmp(sub->thing_name,
 						    $3) == 0)
 							fail = true;
 					break;
 				}
 			}
-			/*
-			 * fail from previous tests
-			 * check correct port
-			 * test max subscriptions
-			 * subscribe
-			 */
+
+			if (fail)
+				goto done;
+
 			TAILQ_FOREACH(thing, thingsd_env->things, entry) {
-				if (fail)
+				if (thing->port != client->port) {
+					fail = true;
 					continue;
-				if (thing->port != client->port)
-					continue;
-				if (strcmp(thing->name, $3) == 0)
-					if (strcmp(thing->password, $5) == 0) {
-						if (client->subs++ >=
-						    thingsd_env->max_subs) {
-						    	log_warn("max "
-							    "subscriptions "
-							    "reached");
-							continue;
-						}
-						client->subscribed = true;
-						n = strlcpy(client->
-						    sub_names[client->le],
-						    thing->name,
-						    sizeof(client->sub_names));
-						client->le++;
-						thing->client_cnt++;
-						log_info("client %s subscribed "
-						    "to %s", client->name,
-						    thing->name);
-						continue;
-					}
+				}
+				if (strcmp(thing->name, $3) == 0) {
+					fail = false;
+					break;
+				}
 			}
+
+			if (fail)
+				goto done;
+
+			if (strcmp(thing->password, $5) == 0) {
+				if (client->subs++ >= thingsd_env->max_subs)
+					log_warn("max subscriptions reached");
+				else {
+					client->subscribed = true;
+					nsub = new_sub(thing->name);
+					TAILQ_INSERT_TAIL(
+					    client->subscriptions, nsub, entry);
+					client->le++;
+					thing->client_cnt++;
+					log_info("client %s subscribed to %s",
+					    client->name, thing->name);
+				}
+			}
+
+done:
 			free($3);
 			free($5);
-		};
+		}
+		;
 
 subthings2	: subthings2 subthings nl
 		| subthings optnl
@@ -1293,6 +1297,23 @@ parse_buf(struct client *pclient, u_char *pkt, int len)
 	closebuff(file);
 
 	return (errors ? -1 : 0);
+}
+
+struct subscription *
+new_sub(char *name)
+{
+	struct subscription	*sub;
+	size_t			 n;
+
+	sub = calloc(1, sizeof(*sub));
+	if (sub == NULL)
+		fatal("%s: calloc", __func__);
+	memset(&sub->thing_name, 0, sizeof(sub->thing_name));
+	n = strlcpy(sub->thing_name, name, sizeof(sub->thing_name));
+	if (n >= sizeof(sub->thing_name))
+		fatalx("%s: sub->thing_name too long", __func__);
+
+	return (sub);
 }
 
 struct thing *

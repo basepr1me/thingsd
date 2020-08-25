@@ -100,15 +100,21 @@ struct thingsd_parent_info {
 	char		 text[THINGSD_MAXTEXT];
 };
 
+struct subscription {
+	TAILQ_ENTRY(subscription)	 entry;
+	char				 thing_name[THINGSD_MAXNAME];
+};
+TAILQ_HEAD(subscriptionlist, subscription);
+
 struct client {
 	TAILQ_ENTRY(client)	 entry;
+	struct subscriptionlist	*subscriptions;
 	struct evbuffer		*evb;
 	struct event		*ev;
 	struct bufferevent	*bev;
 	struct socket		*socket;
 	bool			 subscribed;
 	char			 name[THINGSD_MAXNAME];
-	char			*sub_names[THINGSD_MAXTEXT];
 	int			 fd;
 	int			 port;
 	time_t			 join_time;
@@ -123,6 +129,7 @@ TAILQ_HEAD(clientlist, client);
 struct socket {
 	TAILQ_ENTRY(socket)	 entry;
 	struct event		*ev;
+	struct event		 pause;
 	char			 name[THINGSD_MAXNAME];
 	int			 fd;
 	int			 port;
@@ -250,10 +257,6 @@ struct thingsd {
 	/* control packets */
 	struct packetclientlist	*packet_clients;
 	int			 packet_client_count;
-
-	/* client accept */
-	struct event		*ev;
-	struct event		 pause;
 };
 
 extern struct thingsd	*thingsd_env;

@@ -63,8 +63,9 @@ accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
 void
 client_accept_paused(int fd, short events, void *arg)
 {
-	struct thingsd		*env = arg;
-	event_add(env->ev, NULL);
+	struct socket		*sock = arg;
+
+	event_add(sock->ev, NULL);
 }
 
 void
@@ -81,6 +82,12 @@ client_conn(int fd, short event, void *arg)
 	backoff.tv_sec = 1;
 	backoff.tv_usec = 0;
 
+	sock = get_socket(env, fd);
+	if (sock == NULL)
+		return;
+
+	event_add(sock->ev, NULL);
+
 	client_fd = accept_reserve(fd, (struct sockaddr *)&ss, &len, FD_RESERVE,
 	    &cgi_inflight);
 	if (client_fd == -1) {
@@ -91,8 +98,8 @@ client_conn(int fd, short event, void *arg)
 			return;
 		case EMFILE:
 		case ENFILE:
-			event_del(env->ev);
-			evtimer_add(&env->pause, &backoff);
+			event_del(sock->ev);
+			evtimer_add(&sock->pause, &backoff);
 			return;
 		default:
 			log_warnx("client accept failed");
@@ -107,10 +114,6 @@ client_conn(int fd, short event, void *arg)
 	if (client->ev == NULL)
 		goto err;
 
-	sock = get_socket(env, fd);
-	if (sock == NULL)
-		goto err;
-
 	if (sock->tls) {
 		if (tls_accept_socket(sock->tls_ctx, &client->tls_ctx,
 		    client_fd) == -1) {
@@ -120,19 +123,18 @@ client_conn(int fd, short event, void *arg)
 		}
 	}
 
-	*client->sub_names = (char *) calloc(env->max_subs,
-	    sizeof(client->sub_names));
-	if (*client->sub_names == NULL)
+	client->subscriptions = calloc(1, sizeof(*client->subscriptions));
+	if (client->subscriptions == NULL)
 		goto err;
 
-	/*  check for unlimited clients */
+	TAILQ_INIT(client->subscriptions);
+
 	sock->client_cnt++;
 	env->client_cnt++;
 	if (sock->max_clients > 0 && sock->client_cnt > sock->max_clients) {
 		log_debug("%s: %s max clients reached", __func__, sock->name);
 		sock->client_cnt--;
 		env->client_cnt--;
-		free(*client->sub_names);
 		goto err;
 	}
 
@@ -144,7 +146,6 @@ client_conn(int fd, short event, void *arg)
 	if (client->evb == NULL) {
 		sock->client_cnt--;
 		env->client_cnt--;
-		free(*client->sub_names);
 		goto err;
 	}
 
@@ -157,10 +158,7 @@ client_conn(int fd, short event, void *arg)
 		event_del(client->ev);
 		event_set(client->ev, client->fd, EV_READ | EV_PERSIST,
 		    socket_tls_handshake, env);
-		if (event_add(client->ev, NULL)) {
-			free(*client->sub_names);
-			goto err;
-		}
+		event_add(client->ev, NULL);
 		return;
 	}
 
@@ -174,8 +172,12 @@ err:
 		close(client_fd);
 	if (sock->tls)
 		tls_free(client->tls_ctx);
-	free(client->ev);
-	free(client);
+	if (client->subscriptions != NULL)
+		free(client->subscriptions);
+	if (client != NULL) {
+		free(client->ev);
+		free(client);
+	}
 }
 
 void
@@ -222,18 +224,24 @@ client_del(struct thingsd *env, struct client *client)
 {
 	struct thing		*thing;
 	struct client		*pclient, *tclient;
-	size_t			 n;
+	struct subscription	*sub, *tsub;
 
 	TAILQ_FOREACH_SAFE(pclient, env->clients, entry, tclient) {
 		if (pclient->fd == client->fd) {
 			if (pclient->tls)
 				tls_free(pclient->tls_ctx);
 
-			for (n = 0; n < pclient->le; n++)
-				TAILQ_FOREACH(thing, env->things, entry)
-					if (strcmp(pclient->sub_names[n],
+
+			TAILQ_FOREACH_SAFE(sub, pclient->subscriptions, entry,
+			    tsub) {
+				TAILQ_FOREACH(thing, env->things, entry) {
+					if (strcmp(sub->thing_name,
 					    thing->name) == 0)
 						thing->client_cnt--;
+				}
+				TAILQ_REMOVE(pclient->subscriptions, sub,
+				    entry);
+			}
 
 			env->client_cnt--;
 			pclient->socket->client_cnt--;
@@ -250,7 +258,7 @@ client_del(struct thingsd *env, struct client *client)
 			close(pclient->fd);
 			TAILQ_REMOVE(env->clients, pclient, entry);
 			free(pclient->ev);
-			free(*pclient->sub_names);
+			free(pclient->subscriptions);
 			free(pclient);
 			break;
 		}
@@ -263,7 +271,8 @@ client_rd(struct bufferevent *bev, void *arg)
 	struct thingsd		*env = (struct thingsd *)arg;
 	struct thing		*thing = NULL;
 	struct client		*client = NULL, *tclient;
-	size_t			 len, n;
+	struct subscription	*sub;
+	size_t			 len;
 	int			 fd = bev->ev_read.ev_fd;
 	char			*pkt = NULL, *npkt = NULL;
 
@@ -286,8 +295,10 @@ client_rd(struct bufferevent *bev, void *arg)
 			return;
 
 		npkt = calloc(len, sizeof(*npkt));
-		if (npkt == NULL)
+		if (npkt == NULL) {
+			free(pkt);
 			return;
+		}
 
 		bufferevent_disable(client->bev, EV_READ);
 		evbuffer_remove(client->evb, pkt, len);
@@ -302,19 +313,16 @@ client_rd(struct bufferevent *bev, void *arg)
 		}
 	} else if (client->subscribed) {
 		/* write to things */
-		for (n = 0; n < client->le; n++) {
+		TAILQ_FOREACH(sub, client->subscriptions, entry) {
 			TAILQ_FOREACH(thing, env->things, entry) {
-				if (strcmp(client->sub_names[n],
-				    thing->name) == 0 &&
+				if (strcmp(sub->thing_name, thing->name) == 0 &&
 				    client->port == thing->port) {
-
 					if (thing->exists)
 						client_wr_things(client, thing,
 						    len);
 					else
 						evbuffer_drain(client->evb,
 						    len);
-
 				}
 			}
 		}
@@ -403,6 +411,7 @@ client_wr_things(struct client *client, struct thing *thing, size_t len)
 			if (thing->fd == -1) {
 				log_warnx("%s: temporary ipaddr connection"
 				    " failed", __func__);
+				free(pkt);
 				return;
 			}
 

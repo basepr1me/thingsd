@@ -235,8 +235,9 @@ main(int argc, char *argv[])
 					done = 1;
 					break;
 				}
-				if ((ctl_pkt = calloc(IMSG_DATA_SIZE(&imsg),
-				    sizeof(*ctl_pkt))) == NULL)
+				ctl_pkt = calloc(IMSG_DATA_SIZE(&imsg),
+				    sizeof(*ctl_pkt));
+				if (ctl_pkt == NULL)
 					err(1, "%s: calloc", __func__);
 				if ((ctl_pkt = strndup(imsg.data,
 				    IMSG_DATA_SIZE(&imsg))) == NULL) {

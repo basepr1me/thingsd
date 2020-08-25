@@ -257,6 +257,7 @@ things_shutdown(void)
 	struct client		*client, *tclient;
 	struct dead_thing	*dead_thing, *tdead_thing;
 	struct packet_client	*packet_client, *tpacket_client;
+	struct subscription	*sub, *tsub;
 
 	/* clean up packet clients */
 	TAILQ_FOREACH_SAFE(packet_client, thingsd_env->packet_clients, entry,
@@ -295,8 +296,9 @@ things_shutdown(void)
 	/* clean up clients */
 	TAILQ_FOREACH_SAFE(client, thingsd_env->clients, entry, tclient) {
 		close(client->fd);
-		free(*client->sub_names);
-		*client->sub_names = NULL;
+		TAILQ_FOREACH_SAFE(sub, client->subscriptions, entry, tsub)
+			TAILQ_REMOVE(client->subscriptions, sub, entry);
+		free(client->subscriptions);
 		TAILQ_REMOVE(thingsd_env->clients, client, entry);
 		free(client);
 	}

@@ -192,7 +192,7 @@ recreate:
 			    client_conn, env);
 			if (event_add(sock->ev, NULL))
 				fatalx("event add sock");
-			evtimer_set(&env->pause, client_accept_paused, env);
+			evtimer_set(&sock->pause, client_accept_paused, sock);
 		}
 
 		if (conn_socket != NULL && conn_socket->fd > 0) {
@@ -419,9 +419,9 @@ socket_rd(struct bufferevent *bev, void *arg)
 	struct thingsd		*env = (struct thingsd *)arg;
 	struct thing		*thing = NULL, *tthing;
 	struct client		*client;
+	struct subscription	*sub;
 	size_t			 len;
 	int			 fd = bev->ev_read.ev_fd;
-	size_t			 n;
 	char			*pkt = NULL;
 
 	TAILQ_FOREACH(tthing, env->things, entry) {
@@ -437,10 +437,10 @@ socket_rd(struct bufferevent *bev, void *arg)
 				return;
 
 			evbuffer_remove(thing->evb, pkt, len);
-
 			TAILQ_FOREACH(client, env->clients, entry) {
-				for (n = 0; n < client->le; n++) {
-					if (strcmp(client->sub_names[n],
+				TAILQ_FOREACH(sub, client->subscriptions,
+				    entry) {
+					if (strcmp(sub->thing_name,
 					    thing->name) == 0)
 						bufferevent_write(client->bev,
 						    pkt, len);

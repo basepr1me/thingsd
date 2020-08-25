@@ -32,9 +32,9 @@ udp_event(int fd, short event, void *arg)
 	struct thingsd		*env = (struct thingsd *)arg;
 	struct thing		*thing = NULL, *tthing;
 	struct client		*client;
+	struct subscription	*sub;
 	char			 pkt[PKT_BUFF];
 	int			 len;
-	size_t			 n;
 	socklen_t		*addrlen = NULL;
 	struct sockaddr		*addr = NULL;
 
@@ -52,9 +52,8 @@ udp_event(int fd, short event, void *arg)
 	if (len > 0) {
 		/*  write to clients */
 		TAILQ_FOREACH(client, env->clients, entry) {
-			for (n = 0; n < client->le; n++) {
-				if (strcmp(client->sub_names[n],
-				    thing->name) == 0)
+			TAILQ_FOREACH(sub, client->subscriptions, entry) {
+				if (strcmp(sub->thing_name, thing->name) == 0)
 					bufferevent_write(client->bev, pkt,
 					    len);
 			}
