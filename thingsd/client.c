@@ -34,7 +34,7 @@
 #define FD_RESERVE		5
 #define FD_NEEDED		6
 
-int cgi_inflight = 0;
+volatile int client_inflight = 0;
 
 int		 accept_reserve(int, struct sockaddr *, socklen_t *, int,
 		    volatile int *);
@@ -89,7 +89,7 @@ client_conn(int fd, short event, void *arg)
 	event_add(sock->ev, NULL);
 
 	client_fd = accept_reserve(fd, (struct sockaddr *)&ss, &len, FD_RESERVE,
-	    &cgi_inflight);
+	    &client_inflight);
 	if (client_fd == -1) {
 		switch (errno) {
 		case EINTR:
@@ -167,7 +167,7 @@ client_conn(int fd, short event, void *arg)
 	return;
 err:
 	log_debug("%s: client error", __func__);
-	cgi_inflight--;
+	client_inflight--;
 	if (client_fd != -1)
 		close(client_fd);
 	if (sock->tls)
@@ -255,6 +255,7 @@ client_del(struct thingsd *env, struct client *client)
 			if (pclient->bev != NULL)
 				bufferevent_free(pclient->bev);
 
+			client_inflight--;
 			close(pclient->fd);
 			TAILQ_REMOVE(env->clients, pclient, entry);
 			free(pclient->ev);
