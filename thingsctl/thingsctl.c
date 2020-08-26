@@ -69,7 +69,7 @@ main(int argc, char *argv[])
 	int			 done = 0;
 	int			 n, verbose = 0;
 	int			 ch, v = 0;
-	char			*sockname, *ctl_pkt = NULL;
+	char			*sockname;
 
 	sockname = THINGSD_SOCKET;
 	while ((ch = getopt(argc, argv, "s:")) != -1) {
@@ -235,17 +235,7 @@ main(int argc, char *argv[])
 					done = 1;
 					break;
 				}
-				ctl_pkt = NULL;
-				ctl_pkt = calloc(IMSG_DATA_SIZE(&imsg),
-				    sizeof(*ctl_pkt));
-				if (ctl_pkt == NULL)
-					err(1, "%s: calloc", __func__);
-				ctl_pkt = strndup(imsg.data,
-				    IMSG_DATA_SIZE(&imsg));
-				if (ctl_pkt == NULL)
-					err(1, "%s: calloc", __func__);
-				printf("%s\n", ctl_pkt);
-				free(ctl_pkt);
+				printf("%s\n", imsg.data);
 				break;
 			case SHOW_PARENT:
 				done = show_parent_msg(&imsg);
