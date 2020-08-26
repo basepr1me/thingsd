@@ -265,6 +265,9 @@ socket_tls_handshake(int fd, short event, void *arg)
 		}
 	}
 
+	if (client == NULL)
+		return;
+
 	ret = tls_handshake(client->tls_ctx);
 
 	if (ret == 0) {

@@ -261,7 +261,6 @@ locationopts1	: bindopts2
 					if (pn >= sizeof(new_thing->parity))
 						fatalx("%s: new_thing->parity "
 						    "too long", __func__);
-					free($2);
 					continue;
 				}
 			}
@@ -270,6 +269,7 @@ locationopts1	: bindopts2
 				yyerror("parity syntax error");
 				YYERROR;
 			}
+			free($2);
 		}
 		| SOFTWARE NUMBER {
 			if ($2 > 1 || $2 < 0) {
@@ -417,7 +417,7 @@ subopts		: {
 		;
 
 subthings	: THING '{' STRING optcomma STRING '}' optcomma {
-			struct thing		*thing;
+			struct thing		*thing = NULL;
 			struct subscription	*sub, *nsub;
 			bool			 fail = false;
 
@@ -454,7 +454,7 @@ subthings	: THING '{' STRING optcomma STRING '}' optcomma {
 				}
 			}
 
-			if (fail)
+			if (thing == NULL || fail)
 				goto done;
 
 			if (strcmp(thing->password, $5) == 0) {
@@ -471,15 +471,14 @@ subthings	: THING '{' STRING optcomma STRING '}' optcomma {
 					    client->name, thing->name);
 				}
 			}
-
 done:
 			free($3);
 			free($5);
 		}
 		;
 
-subthings2	: subthings2 subthings nl
-		| subthings optnl
+subthings2	: subthings2 subthings
+		| subthings
 		;
 
 thing		: THING STRING {
@@ -824,7 +823,7 @@ int		 pushback_index = 0;
 int
 lgetc(int quotec)
 {
-	int		c, next;
+	int		c = 0, next;
 
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */

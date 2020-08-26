@@ -170,11 +170,11 @@ err:
 	client_inflight--;
 	if (client_fd != -1)
 		close(client_fd);
-	if (sock->tls)
-		tls_free(client->tls_ctx);
-	if (client->subscriptions != NULL)
-		free(client->subscriptions);
 	if (client != NULL) {
+		if (sock->tls)
+			tls_free(client->tls_ctx);
+		if (client->subscriptions != NULL)
+			free(client->subscriptions);
 		free(client->ev);
 		free(client);
 	}
@@ -280,11 +280,12 @@ client_rd(struct bufferevent *bev, void *arg)
 	TAILQ_FOREACH(tclient, env->clients, entry) {
 		if (tclient->fd == fd) {
 			client = tclient;
-			if (client == NULL)
-				return;
 			break;
 		}
 	}
+
+	if (client == NULL)
+		return;
 
 	client->evb = EVBUFFER_INPUT(bev);
 	len = EVBUFFER_LENGTH(client->evb);
@@ -337,7 +338,7 @@ client_tls_readcb(int fd, short event, void *arg)
 {
 	struct bufferevent	*bufev = (struct bufferevent *)arg;
 	struct thingsd		*env = bufev->cbarg;
-	struct client		*client, *tclient;
+	struct client		*client = NULL, *tclient;
 	char			 pkt[PKT_BUFF];
 	ssize_t			 ret;
 	size_t			 len;
@@ -347,6 +348,9 @@ client_tls_readcb(int fd, short event, void *arg)
 		if (tclient->fd == fd)
 			client = tclient;
 	}
+
+	if (client == NULL)
+		return;
 
 	memset(pkt, 0, sizeof(pkt));
 
@@ -458,6 +462,9 @@ client_tls_writecb(int fd, short event, void *arg)
 	}
 
 	if (EVBUFFER_LENGTH(bufev->output)) {
+		if (client == NULL)
+			return;
+
 		ret = tls_write(client->tls_ctx,
 		    EVBUFFER_DATA(bufev->output),
 		    EVBUFFER_LENGTH(bufev->output));

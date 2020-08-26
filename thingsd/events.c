@@ -30,22 +30,27 @@ void
 udp_event(int fd, short event, void *arg)
 {
 	struct thingsd		*env = (struct thingsd *)arg;
-	struct thing		*thing = NULL, *tthing;
-	struct client		*client;
-	struct subscription	*sub;
+	struct thing		*thing = NULL, *tthing = NULL;
+	struct client		*client = NULL;
+	struct subscription	*sub = NULL;
 	char			 pkt[PKT_BUFF];
 	int			 len;
 	socklen_t		*addrlen = NULL;
 	struct sockaddr		*addr = NULL;
+	bool			 fail = true;
 
 	memset(pkt, 0, sizeof(pkt));
 
 	TAILQ_FOREACH(tthing, env->things, entry) {
 		if (tthing->fd == fd) {
 			thing = tthing;
+			fail = false;
 			break;
 		}
 	}
+
+	if (fail)
+		return;
 
 	len = recvfrom(fd, pkt, sizeof(pkt), 0, addr, addrlen);
 

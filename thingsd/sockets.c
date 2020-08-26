@@ -378,6 +378,7 @@ get_ifaddrs(char *name)
 
 	}
 
+	free(addr);
 	freeifaddrs(ifaps);
 	return NULL;
 }

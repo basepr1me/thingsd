@@ -114,8 +114,8 @@ main(int argc, char *argv[])
 	case LOG_BRIEF:
 	case KILL_CLIENT:
 	case SHOW_PACKETS:
-		/* if (geteuid() != 0) */
-		/* 	errx(1, "need root privileges"); */
+		if (geteuid() != 0)
+			errx(1, "need root privileges");
 		break;
 	default:
 		break;
@@ -235,18 +235,17 @@ main(int argc, char *argv[])
 					done = 1;
 					break;
 				}
+				ctl_pkt = NULL;
 				ctl_pkt = calloc(IMSG_DATA_SIZE(&imsg),
 				    sizeof(*ctl_pkt));
 				if (ctl_pkt == NULL)
 					err(1, "%s: calloc", __func__);
-				if ((ctl_pkt = strndup(imsg.data,
-				    IMSG_DATA_SIZE(&imsg))) == NULL) {
-					free(ctl_pkt);
-					break;
-				}
+				ctl_pkt = strndup(imsg.data,
+				    IMSG_DATA_SIZE(&imsg));
+				if (ctl_pkt == NULL)
+					err(1, "%s: calloc", __func__);
 				printf("%s\n", ctl_pkt);
 				free(ctl_pkt);
-				ctl_pkt = NULL;
 				break;
 			case SHOW_PARENT:
 				done = show_parent_msg(&imsg);
@@ -259,7 +258,6 @@ main(int argc, char *argv[])
 	}
 	printf("\n");
 	close(ctl_sock);
-	free(ctl_pkt);
 	free(ibuf);
 
 	return (0);
