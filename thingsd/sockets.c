@@ -46,7 +46,6 @@ create_sockets(struct thingsd *env, bool reconn)
 	bool			 fail = false;
 	evbuffercb		 socketrd = socket_rd;
 	evbuffercb		 socketwr = socket_wr;
-	size_t			 n;
 
 	TAILQ_FOREACH(thing, env->things, entry) {
 		if (reconn) {
@@ -67,9 +66,7 @@ create_sockets(struct thingsd *env, bool reconn)
 
 		sock->max_clients += thing->max_clients;
 
-		n = strlcpy(sock->name, thing->name, sizeof(sock->name));
-		if (n >= sizeof(sock->name))
-			fatalx("%s: sock->name too long", __func__);
+		memcpy(&sock->name, thing->name, sizeof(sock->name));
 
 		if (strlen(thing->iface) != 0)
 			iface = get_ifaddrs(thing->iface);
@@ -204,6 +201,7 @@ recreate:
 		}
 
 	}
+	free(iface);
 }
 
 int
@@ -491,7 +489,6 @@ sockets_show_info(struct privsep *ps, struct imsg *imsg)
 {
 	char filter[THINGSD_MAXNAME];
 	struct socket	*socket, nsi;
-	size_t		 n;
 
 	switch (imsg->hdr.type) {
 	case IMSG_GET_INFO_SOCKETS_REQUEST:
@@ -502,11 +499,8 @@ sockets_show_info(struct privsep *ps, struct imsg *imsg)
 			if (filter[0] == '\0' || memcmp(filter,
 			    socket->name, sizeof(filter)) == 0) {
 
-				n = strlcpy(nsi.name, socket->name,
+				memcpy(&nsi.name, socket->name,
 				    sizeof(nsi.name));
-				if (n >= sizeof(nsi.name))
-					fatalx("%s: nsi.name too long",
-					    __func__);
 
 				nsi.fd = socket->fd;
 				nsi.port = socket->port;

@@ -100,7 +100,6 @@ const char		*parity[4] = {"none", "odd", "even", "space"};
 struct client		*client, *tclient;
 char			 my_name[THINGSD_MAXTEXT];
 int			 my_fd, pkt_len;
-size_t			 pn;
 
 struct thing		*conf_new_thing(char *);
 
@@ -155,21 +154,15 @@ conf_main	: bindopts1
 		;
 
 bindopts1	: BIND INTERFACE STRING {
-			pn = strlcpy(thingsd_env->iface, $3,
+			memcpy(&thingsd_env->iface, $3,
 			    sizeof(thingsd_env->iface));
-			if (pn >= sizeof(thingsd_env->iface))
-				fatalx("%s: thingsd_env->iface too long",
-				    __func__);
 			free($3);
 		}
 		;
 
 bindopts2	: BIND INTERFACE STRING {
-			pn = strlcpy(new_thing->iface, $3,
+			memcpy(&new_thing->iface, $3,
 			    sizeof(new_thing->iface));
-			if (pn >= sizeof(new_thing->iface))
-				fatalx("%s: new_thing->iface too long",
-				    __func__);
 			free($3);
 		}
 		;
@@ -242,11 +235,8 @@ locationopts1	: bindopts2
 		}
 		| maxclientssub
 		| PASSWORD STRING {
-			pn = strlcpy(new_thing->password, $2,
+			memcpy(&new_thing->password, $2,
 			    sizeof(new_thing->password));
-			if (pn >= sizeof(new_thing->password))
-				fatalx("%s: new_thing->password too long",
-				    __func__);
 			free($2);
 		}
 		| PARITY STRING {
@@ -256,11 +246,8 @@ locationopts1	: bindopts2
 
 			for (pc = 0; pc < parities; pc++) {
 				if (strcmp($2, parity[pc]) == 0) {
-					pn = strlcpy(new_thing->parity, $2,
+					memcpy(&new_thing->parity, $2,
 					    sizeof(new_thing->parity));
-					if (pn >= sizeof(new_thing->parity))
-						fatalx("%s: new_thing->parity "
-						    "too long", __func__);
 					continue;
 				}
 			}
@@ -317,16 +304,9 @@ name		: NAME optcomma STRING {
 			TAILQ_FOREACH(client, thingsd_env->clients, entry) {
 				if (client == tclient) {
 					memset(&my_name, 0, sizeof(my_name));
-					pn = strlcpy(client->name, $3,
+					memcpy(&client->name, $3,
 					    sizeof(client->name));
-					if (pn >= sizeof(client->name))
-						fatalx("%s: client->name too "
-						    "long", __func__);
-					pn = strlcpy(my_name, $3,
-					    sizeof(my_name));
-					if (pn >= sizeof(my_name))
-						fatalx("%s: my_name too long ",
-						    __func__);
+					memcpy(&my_name, $3, sizeof(my_name));
 					break;
 				}
 			}
@@ -372,11 +352,8 @@ socketopts1	: CONNECT ON PORT NUMBER {
 			new_thing->rcv_port = $4;
 		}
 		| PASSWORD STRING {
-			pn = strlcpy(new_thing->password, $2,
+			memcpy(&new_thing->password, $2,
 			    sizeof(new_thing->password));
-			if (pn >= sizeof(new_thing->password))
-				fatalx("%s: new_thing->password too long",
-				    __func__);
 			free($2);
 		}
 		| PERSISTENT NUMBER {
@@ -485,11 +462,8 @@ thing		: THING STRING {
 			new_thing = conf_new_thing($2);
 
 			if (strlen(thingsd_env->iface) != 0) {
-				pn = strlcpy(new_thing->iface,
-				thingsd_env->iface, sizeof(new_thing->iface));
-				if (pn >= sizeof(new_thing->iface))
-					fatalx("%s: new_thing->iface too long",
-					    __func__);
+				memcpy(&new_thing->iface, thingsd_env->iface,
+				    sizeof(new_thing->iface));
 			} else
 				memset(new_thing->iface, 0,
 				    sizeof(new_thing->iface));
@@ -517,31 +491,19 @@ thing		: THING STRING {
 
 			memset(new_thing->tls_cert_file, 0,
 			    sizeof(new_thing->tls_cert_file));
-			pn = strlcpy(new_thing->tls_cert_file, TLS_CERT,
+			memcpy(&new_thing->tls_cert_file, TLS_CERT,
 			    sizeof(new_thing->tls_cert_file));
-			if (pn >= sizeof(new_thing->tls_cert_file))
-				fatalx("%s: new_thing->tls_cert_file too long",
-				    __func__);
 			memset(new_thing->tls_key_file, 0,
 			    sizeof(new_thing->tls_key_file));
-			pn = strlcpy(new_thing->tls_key_file, TLS_KEY,
+			memcpy(&new_thing->tls_key_file, TLS_KEY,
 			    sizeof(new_thing->tls_key_file));
-			if (pn >= sizeof(new_thing->tls_key_file))
-				fatalx("%s: new_thing->tls_key_file too long",
-				    __func__);
-			pn = strlcpy(new_thing->tls_ciphers, TLS_CIPHERS,
+			memcpy(&new_thing->tls_ciphers, TLS_CIPHERS,
 			    sizeof(new_thing->tls_ciphers));
-			if (pn >= sizeof(new_thing->tls_ciphers))
-				fatalx("thing strlcpy");
-			pn = strlcpy(new_thing->tls_dhe_params, TLS_DHE_PARAMS,
+			memcpy(&new_thing->tls_dhe_params, TLS_DHE_PARAMS,
 			    sizeof(new_thing->tls_dhe_params));
-			if (pn >= sizeof(new_thing->tls_dhe_params))
-				fatalx("thing strlcpy");
-			pn = strlcpy(new_thing->tls_ecdhe_curves,
+			memcpy(&new_thing->tls_ecdhe_curves,
 			    TLS_ECDHE_CURVES,
 			    sizeof(new_thing->tls_ecdhe_curves));
-			if (pn >= sizeof(new_thing->tls_ecdhe_curves))
-				fatalx("thing strlcpy");
 			free($2);
 		} '{' optnl thingopts2 '}' {
 			if (strlen(new_thing->ipaddr) != 0 &&
@@ -579,27 +541,17 @@ thingopts1	: IPADDR STRING {
 				yyerror("ipaddr string empty");
 				YYERROR;
 			}
-			pn = strlcpy(new_thing->ipaddr, $2,
+			memcpy(&new_thing->ipaddr, $2,
 			    sizeof(new_thing->ipaddr));
-			if (pn >= sizeof(new_thing->ipaddr))
-				fatalx("%s: new_thing->ipaddr too long",
-				    __func__);
 			free($2);
 		} '{' optnl socketopts2 '}'
 		| LOCATION STRING {
-			pn = strlcpy(new_thing->location, $2,
+			memcpy(&new_thing->location, $2,
 			    sizeof(new_thing->location));
-			if (pn >= sizeof(new_thing->location))
-				fatalx("%s: new_thing->location too long",
-				    __func__);
 			free($2);
 		} locationopts
 		| UDP STRING {
-			pn = strlcpy(new_thing->udp, $2,
-			    sizeof(new_thing->udp));
-			if (pn >= sizeof(new_thing->udp))
-				fatalx("%s: new_thing->udp too long",
-				    __func__);
+			memcpy(&new_thing->udp, $2, sizeof(new_thing->udp));
 			free($2);
 		} '{' optnl socketopts2 '}'
 		;
@@ -620,11 +572,8 @@ things		: THINGS '{' subthings2 '}'
 tlscltopt	: /* empty */
 		| tlscltopt CRL STRING {
 			new_thing->tls_flags = TLSFLAG_CRL;
-			pn = strlcpy(new_thing->tls_crl_file, $3,
+			memcpy(&new_thing->tls_crl_file, $3,
 			    sizeof(new_thing->tls_crl_file));
-			if (pn >= sizeof(new_thing->tls_crl_file))
-				fatalx("%s: new_thing->tls_crl_file too long",
-				    __func__);
 			free($3);
 		}
 		| tlscltopt OPTIONAL {
@@ -633,66 +582,39 @@ tlscltopt	: /* empty */
 		;
 
 tlsopts		: CERTIFICATE STRING {
-			pn = strlcpy(new_thing->tls_cert_file, $2,
+			memcpy(&new_thing->tls_cert_file, $2,
 			    sizeof(new_thing->tls_cert_file));
-			if (pn >= sizeof(new_thing->tls_cert_file))
-				fatalx("%s: new_thing->tls_cert_file too long",
-				    __func__);
 			free($2);
 		}
 		| CIPHERS STRING {
-			if (strlcpy(new_thing->tls_ciphers, $2,
-			    sizeof(new_thing->tls_ciphers)) >=
-			    sizeof(new_thing->tls_ciphers)) {
-				yyerror("ciphers too long");
-				free($2);
-				YYERROR;
-			}
+			memcpy(&new_thing->tls_ciphers, $2,
+			    sizeof(new_thing->tls_ciphers));
 			free($2);
 		}
 		| CLIENT CA STRING tlscltopt {
 			new_thing->tls_flags |= TLSFLAG_CA;
-			pn = strlcpy(new_thing->tls_ca_file, $3,
+			memcpy(&new_thing->tls_ca_file, $3,
 			    sizeof(new_thing->tls_ca_file));
-			if (pn >= sizeof(new_thing->tls_ca_file))
-				fatalx("%s: new_thing->tls_ca_file too long",
-				    __func__);
 			free($3);
 		}
 		| DHE STRING {
-			if (strlcpy(new_thing->tls_dhe_params, $2,
-			    sizeof(new_thing->tls_dhe_params)) >=
-			    sizeof(new_thing->tls_dhe_params)) {
-				yyerror("dhe too long");
-				free($2);
-				YYERROR;
-			}
+			memcpy(&new_thing->tls_dhe_params, $2,
+			    sizeof(new_thing->tls_dhe_params));
 			free($2);
 		}
 		| ECDHE STRING {
-			if (strlcpy(new_thing->tls_ecdhe_curves, $2,
-			    sizeof(new_thing->tls_ecdhe_curves)) >=
-			    sizeof(new_thing->tls_ecdhe_curves)) {
-				yyerror("ecdhe too long");
-				free($2);
-				YYERROR;
-			}
+			memcpy(&new_thing->tls_ecdhe_curves, $2,
+			    sizeof(new_thing->tls_ecdhe_curves));
 			free($2);
 		}
 		| KEY STRING {
-			pn = strlcpy(new_thing->tls_key_file, $2,
+			memcpy(&new_thing->tls_key_file, $2,
 			    sizeof(new_thing->tls_key_file));
-			if (pn >= sizeof(new_thing->tls_key_file))
-				fatalx("%s: new_thing->tls_key_file too long",
-				    __func__);
 			free($2);
 		}
 		| OCSP STRING {
-			pn = strlcpy(new_thing->tls_ocsp_staple_file, $2,
+			memcpy(&new_thing->tls_ocsp_staple_file, $2,
 			    sizeof(new_thing->tls_ocsp_staple_file));
-			if (pn >= sizeof(new_thing->tls_ocsp_staple_file))
-				fatalx("%s: new_thing->tls_ocsp_staple_file "
-				    "too long", __func__);
 			free($2);
 		}
 		| PROTOCOLS STRING {
@@ -1257,7 +1179,7 @@ cmdline_symset(char *s)
 	if (sym == NULL)
 		fatal("%s: malloc", __func__);
 
-	strlcpy(sym, s, len);
+	memcpy(&sym, s, len);
 
 	ret = symset(sym, val + 1, 1);
 	free(sym);
@@ -1302,15 +1224,12 @@ struct subscription *
 new_sub(char *name)
 {
 	struct subscription	*sub;
-	size_t			 n;
 
 	sub = calloc(1, sizeof(*sub));
 	if (sub == NULL)
 		fatal("%s: calloc", __func__);
 	memset(&sub->thing_name, 0, sizeof(sub->thing_name));
-	n = strlcpy(sub->thing_name, name, sizeof(sub->thing_name));
-	if (n >= sizeof(sub->thing_name))
-		fatalx("%s: sub->thing_name too long", __func__);
+	memcpy(&sub->thing_name, name, sizeof(sub->thing_name));
 
 	return (sub);
 }
@@ -1319,7 +1238,6 @@ struct thing *
 conf_new_thing(char *name)
 {
 	struct thing	*thing;
-	size_t		 n;
 
 	TAILQ_FOREACH(thing, thingsd_env->things, entry) {
 		if (strcmp(name, thing->name) == 0)
@@ -1329,9 +1247,7 @@ conf_new_thing(char *name)
 	thing = calloc(1, sizeof(*thing));
 	if (thing == NULL)
 		fatal("%s: calloc", __func__);
-	n = strlcpy(thing->name, name, sizeof(thing->name));
-	if (n >= sizeof(thing->name))
-		fatalx("%s: thing->name too long", __func__);
+	memcpy(&thing->name, name, sizeof(thing->name));
 
 	TAILQ_INSERT_TAIL(thingsd_env->things, thing, entry);
 

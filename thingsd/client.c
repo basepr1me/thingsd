@@ -567,7 +567,6 @@ clients_show_info(struct privsep *ps, struct imsg *imsg)
 {
 	char filter[THINGSD_MAXNAME];
 	struct client	*client, nci;
-	size_t		 n;
 
 	switch (imsg->hdr.type) {
 	case IMSG_GET_INFO_CLIENTS_REQUEST:
@@ -578,11 +577,8 @@ clients_show_info(struct privsep *ps, struct imsg *imsg)
 			if (filter[0] == '\0' || memcmp(filter,
 			    client->name, sizeof(filter)) == 0) {
 
-				n = strlcpy(nci.name, client->name,
+				memcpy(&nci.name, client->name,
 				    sizeof(nci.name));
-				if (n >= sizeof(nci.name))
-					fatalx("%s: nci.name too long",
-					    __func__);
 
 				nci.subscribed = client->subscribed;
 				nci.fd = client->fd;

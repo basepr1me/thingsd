@@ -95,7 +95,7 @@ main(int argc, char *argv[])
 	memset(&sun, 0, sizeof(sun));
 	sun.sun_family = AF_UNIX;
 
-	strlcpy(sun.sun_path, sockname, sizeof(sun.sun_path));
+	memcpy(&sun.sun_path, sockname, sizeof(sun.sun_path));
 	if (connect(ctl_sock, (struct sockaddr *)&sun, sizeof(sun)) == -1)
 		err(1, "connect: %s", sockname);
 

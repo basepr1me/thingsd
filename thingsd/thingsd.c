@@ -455,7 +455,6 @@ void
 thingsd_configure_things(struct privsep *ps)
 {
 	struct thing	*thing, nti;
-	size_t		 n;
 
 	open_things(thingsd_env, false);
 	create_sockets(thingsd_env, false);
@@ -468,35 +467,21 @@ thingsd_configure_things(struct privsep *ps)
 		nti.hw_ctl = thing->hw_ctl;
 		nti.persist = thing->persist;
 
-		n = strlcpy(nti.iface, thing->iface, sizeof(nti.iface));
-		if (n >= sizeof(nti.iface))
-			fatalx("%s: nti.iface too long", __func__);
+		memcpy(&nti.iface, thing->iface, sizeof(nti.iface));
 
-		n = strlcpy(nti.ipaddr, thing->ipaddr, sizeof(nti.ipaddr));
-		if (n >= sizeof(nti.ipaddr))
-			fatalx("%s: nti.ipaddr too long", __func__);
+		memcpy(&nti.ipaddr, thing->ipaddr, sizeof(nti.ipaddr));
 
-		n = strlcpy(nti.parity, thing->parity, sizeof(nti.parity));
-		if (n >= sizeof(nti.parity))
-			fatalx("%s: nti.parity name too long", __func__);
+		memcpy(&nti.parity, thing->parity, sizeof(nti.parity));
 
-		n = strlcpy(nti.name, thing->name, sizeof(nti.name));
-		if (n >= sizeof(nti.name))
-			fatalx("%s: nti.name too long", __func__);
+		memcpy(&nti.name, thing->name, sizeof(nti.name));
 
-		n = strlcpy(nti.password, thing->password,
+		memcpy(&nti.password, thing->password,
 		    sizeof(nti.password));
-		if (n >= sizeof(nti.password))
-			fatalx("%s: nti.password too long", __func__);
 
-		n = strlcpy(nti.location, thing->location,
+		memcpy(&nti.location, thing->location,
 		    sizeof(nti.location));
-		if (n >= sizeof(nti.location))
-			fatalx("%s: nti.location too long", __func__);
 
-		n = strlcpy(nti.udp, thing->udp, sizeof(nti.udp));
-		if (n >= sizeof(nti.udp))
-			fatalx("%s: nti.name too long", __func__);
+		memcpy(&nti.udp, thing->udp, sizeof(nti.udp));
 
 		nti.fd = thing->fd;
 		nti.baud = thing->baud;
@@ -511,32 +496,21 @@ thingsd_configure_things(struct privsep *ps)
 
 		nti.tls = thing->tls;
 
-		n = strlcpy(nti.tls_cert_file, thing->tls_cert_file,
+		memcpy(&nti.tls_cert_file, thing->tls_cert_file,
 		    sizeof(nti.tls_cert_file));
-		if (n >= sizeof(nti.tls_cert_file))
-			fatalx("%s: nti.tls_cert_file too long", __func__);
 
-		n = strlcpy(nti.tls_key_file, thing->tls_key_file,
+		memcpy(&nti.tls_key_file, thing->tls_key_file,
 		    sizeof(nti.tls_key_file));
-		if (n >= sizeof(nti.tls_key_file))
-			fatalx("%s: nti.tls_key_file too long", __func__);
 
-		n = strlcpy(nti.tls_ca_file, thing->tls_ca_file,
+		memcpy(&nti.tls_ca_file, thing->tls_ca_file,
 		    sizeof(nti.tls_ca_file));
-		if (n >= sizeof(nti.tls_ca_file))
-			fatalx("%s: nti.tls_ca_file too long", __func__);
 
-		n = strlcpy(nti.tls_crl_file, thing->tls_crl_file,
+		memcpy(&nti.tls_crl_file, thing->tls_crl_file,
 		    sizeof(nti.tls_crl_file));
-		if (n >= sizeof(nti.tls_crl_file))
-			fatalx("%s: nti.tls_crl_file too long", __func__);
 
-		n = strlcpy(nti.tls_ocsp_staple_file,
+		memcpy(&nti.tls_ocsp_staple_file,
 		    thing->tls_ocsp_staple_file,
 		    sizeof(nti.tls_ocsp_staple_file));
-		if (n >= sizeof(nti.tls_ocsp_staple_file))
-			fatalx("%s: nti.tls_ocsp_staple_file too long",
-			    __func__);
 
 		proc_compose(ps, PROC_THINGS, IMSG_ADD_THING,
 		    &nti, sizeof(nti));

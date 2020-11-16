@@ -131,12 +131,7 @@ control_init(struct privsep *ps, struct control_sock *cs)
 	}
 
 	sun.sun_family = AF_UNIX;
-	if (strlcpy(sun.sun_path, cs->cs_name,
-	    sizeof(sun.sun_path)) >= sizeof(sun.sun_path)) {
-		log_warn("%s: %s name too long", __func__, cs->cs_name);
-		close(fd);
-		return (-1);
-	}
+	memcpy(&sun.sun_path, cs->cs_name, sizeof(sun.sun_path));
 
 	if (unlink(cs->cs_name) == -1)
 		if (errno != ENOENT) {
