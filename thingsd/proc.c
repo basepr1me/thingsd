@@ -46,6 +46,8 @@ void	 proc_sig_handler(int, short, void *);
 void	 proc_range(struct privsep *, enum privsep_procid, int *, int *);
 int	 proc_dispatch_null(int, struct privsep_proc *, struct imsg *);
 
+enum privsep_procid privsep_process;
+
 int
 proc_ispeer(struct privsep_proc *procs, unsigned int nproc,
     enum privsep_procid type)

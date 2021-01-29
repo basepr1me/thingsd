@@ -40,6 +40,8 @@
 #include "proc.h"
 #include "thingsd.h"
 
+extern enum privsep_procid privsep_process;
+
 int
 config_init(struct thingsd *env)
 {

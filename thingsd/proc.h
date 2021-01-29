@@ -54,10 +54,10 @@ struct control_sock {
 };
 TAILQ_HEAD(control_socks, control_sock);
 
-struct {
+struct cs {
 	struct event	 ev;
 	int		 fd;
-} control_state;
+};
 
 struct ctl_conn {
 	TAILQ_ENTRY(ctl_conn)	 entry;
@@ -72,16 +72,16 @@ TAILQ_HEAD(ctl_connlist, ctl_conn);
 extern  struct ctl_connlist ctl_conns;
 
 /* privsep */
+#define CONFIG_RELOAD		0x00
+#define CONFIG_THINGS		0x01
+#define CONFIG_ALL		0xff
+
 enum privsep_procid {
 	PROC_PARENT	= 0,
 	PROC_CONTROL,
 	PROC_THINGS,
 	PROC_MAX,
-} privsep_process;
-
-#define CONFIG_RELOAD		0x00
-#define CONFIG_THINGS		0x01
-#define CONFIG_ALL		0xff
+};
 
 struct privsep_pipes {
 	int				*pp_pipes[PROC_MAX];

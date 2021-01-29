@@ -69,6 +69,8 @@ static struct privsep_proc procs[] = {
 static struct privsep_proc *proc_priv = &procs[0];
 static struct passwd proc_privpw;
 
+extern enum privsep_procid privsep_process;
+
 int
 thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
