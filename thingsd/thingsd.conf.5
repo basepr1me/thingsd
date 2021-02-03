@@ -50,23 +50,23 @@ must be quoted.
 .Sh GLOBAL CONFIGURATION
 Here are the settings that can be set globally:
 .Bl -tag -width Ds
-.It Ic bind interface Ar string
-Specify a single interface to create sockets on.
+.It Ic bind tcp interface Ar string
+Specify a single interface to create client listening sockets on.
 If this is not set,
 .Xr thingsd 8
-will attempt to open the default port on all network interfaces.
+will attempt to open thing assigned
+.Ar listen
+ports on all network interfaces.
+.It Ic bind udp interface Ar string
+Specify a single interface to create UDP receive sockets on.
+If this is not set, it is required to set the interface per UDP thing.
 .It Ic connection retry Ar number
 Set the lost connection thing watchdog interval.
 Default is 30 seconds.
 Range is 30-600 seconds.
-.It Ic default port Ar number
-Set the default port for things to communicate on.
-This is a required setting.
 .It Ic max clients Ar number
 Set the default maximum number of clients allowed to connect to each
 .Xr thingsd 8 thing.
-.It Ic max subscriptions Ar number
-Set the maximum number of things a client can subscribe to at a time.
 .It Ic prefork Ar number
 Run the specified number of things processes.
 This increases the performance and prevents delays when connecting to a thing.
@@ -84,12 +84,16 @@ thing.
 .It Ic baud Ar number
 Set the baud rate for a serial thing
 .Ar location .
-.It Ic bind interface Ar string
+.It Ic bind tcp interface Ar string
 Specify a single interface to create a
 .Ar location
 or
 .Ar ipaddr
 thing socket.
+.It Ic bind udp interface Ar string
+Specify a single interface to create a
+.Ar udp
+receive socket for a thing.
 .It Ic connect on port Ar number
 Set the TCP/IP port to connect to for an
 .Ar ipaddr
@@ -113,9 +117,9 @@ Set a local socket port for a
 .Ar udp ,
 or
 .Ar ipaddr
-thing, other than the global default port.
-If TLS is used, the chosen port must be unique from the default port and all
-other things.
+thing.
+This setting is required and must be unique from other thing assigned listen
+ports.
 .It Ic location Ar string Brq ...
 Create a
 .Ar thing
@@ -157,7 +161,7 @@ Set the
 port to listen on for a UDP packet.
 This setting is required for
 .Ar udp
-things.
+things and must be unique from other thing assigned UPD ports.
 .It Ic software Ar number
 Set to 1 to turn on software control for a serial thing
 .Ar location .
@@ -268,8 +272,6 @@ which listens for user datagram protocol packets.
 .El
 .Sh EXAMPLES
 This configuration file would create a serial thing and a TCP/IP host thing.
-The serial thing would communicate on the default port, while the local network
-ipaddr thing would communicate on a separate port.
 .Bd -literal -offset indent
 
 #
@@ -277,8 +279,6 @@ ipaddr thing would communicate on a separate port.
 #
 
 prefork 5
-
-default port 50000
 
 max clients 10
 
@@ -301,6 +301,7 @@ thing "serial_thing" {
 thing "ipaddr_thing" {
 	ipaddr "10.0.0.1" {
 		connect on port 8080
+		listen on port 50000
 		password "password"
 	}
 }

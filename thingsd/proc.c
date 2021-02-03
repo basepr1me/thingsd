@@ -1,3 +1,5 @@
+/*	$OpenBSD: proc.c,v 1.39 2020/08/03 10:57:21 benno Exp $	*/
+
 /*
  * Copyright (c) 2010 - 2016 Reyk Floeter <reyk@openbsd.org>
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -27,13 +29,15 @@
 #include <string.h>
 #include <errno.h>
 #include <signal.h>
+#include <paths.h>
 #include <pwd.h>
 #include <event.h>
 #include <imsg.h>
 
 #include "proc.h"
+#include "thingsd.h"
 
-void	 proc_exec(struct privsep *, struct privsep_proc *, unsigned int,
+void	 proc_exec(struct privsep *, struct privsep_proc *, unsigned int, int,
 	    int, char **);
 void	 proc_setup(struct privsep *, struct privsep_proc *, unsigned int);
 void	 proc_open(struct privsep *, int, int);
@@ -57,7 +61,6 @@ proc_ispeer(struct privsep_proc *procs, unsigned int nproc,
 	for (i = 0; i < nproc; i++)
 		if (procs[i].p_id == type)
 			return (1);
-
 	return (0);
 }
 
@@ -81,7 +84,7 @@ proc_getid(struct privsep_proc *procs, unsigned int nproc,
 
 void
 proc_exec(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
-    int argc, char **argv)
+    int debug, int argc, char **argv)
 {
 	unsigned int		 proc, nargc, i, proc_i;
 	char			**nargv;
@@ -142,6 +145,16 @@ proc_exec(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
 				} else if (fcntl(fd, F_SETFD, 0) == -1)
 					fatal("fcntl");
 
+				/* Daemons detach from terminal. */
+				if (!debug && (fd =
+				    open(_PATH_DEVNULL, O_RDWR, 0)) != -1) {
+					(void)dup2(fd, STDIN_FILENO);
+					(void)dup2(fd, STDOUT_FILENO);
+					(void)dup2(fd, STDERR_FILENO);
+					if (fd > 2)
+						(void)close(fd);
+				}
+
 				execvp(argv[0], nargv);
 				fatal("%s: execvp", __func__);
 				break;
@@ -152,7 +165,6 @@ proc_exec(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
 			}
 		}
 	}
-
 	free(nargv);
 }
 
@@ -193,7 +205,7 @@ proc_connect(struct privsep *ps)
 
 void
 proc_init(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
-    int argc, char **argv, enum privsep_procid proc_id)
+    int debug, int argc, char **argv, enum privsep_procid proc_id)
 {
 	struct privsep_proc	*p = NULL;
 	struct privsep_pipes	*pa, *pb;
@@ -210,7 +222,7 @@ proc_init(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
 		proc_setup(ps, procs, nproc);
 
 		/*
-		 * Create the children sockets so we can use them 
+		 * Create the children sockets so we can use them
 		 * to distribute the rest of the socketpair()s using
 		 * proc_connect() later.
 		 */
@@ -233,7 +245,7 @@ proc_init(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc,
 		}
 
 		/* Engage! */
-		proc_exec(ps, procs, nproc, argc, argv);
+		proc_exec(ps, procs, nproc, debug, argc, argv);
 		return;
 	}
 
@@ -305,9 +317,8 @@ proc_setup(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc)
 
 		id = procs[src].p_id;
 		ps->ps_title[id] = procs[src].p_title;
-		ps->ps_ievs[id] = calloc(ps->ps_instances[id],
-		    sizeof(struct imsgev));
-		if (ps->ps_ievs[id] == NULL)
+		if ((ps->ps_ievs[id] = calloc(ps->ps_instances[id],
+		    sizeof(struct imsgev))) == NULL)
 			fatal("%s: calloc", __func__);
 
 		/* With this set up, we are ready to call imsg_init(). */
@@ -334,9 +345,8 @@ proc_setup(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc)
 	 */
 	for (src = 0; src < PROC_MAX; src++) {
 		/* Allocate destination array for each process */
-		ps->ps_pipes[src] = calloc(ps->ps_instances[src],
-		    sizeof(struct privsep_pipes));
-		if (ps->ps_pipes[src] == NULL)
+		if ((ps->ps_pipes[src] = calloc(ps->ps_instances[src],
+		    sizeof(struct privsep_pipes))) == NULL)
 			fatal("%s: calloc", __func__);
 
 		for (i = 0; i < ps->ps_instances[src]; i++) {
@@ -344,10 +354,9 @@ proc_setup(struct privsep *ps, struct privsep_proc *procs, unsigned int nproc)
 
 			for (dst = 0; dst < PROC_MAX; dst++) {
 				/* Allocate maximum fd integers */
-				pp->pp_pipes[dst] =
+				if ((pp->pp_pipes[dst] =
 				    calloc(ps->ps_instances[dst],
-				    sizeof(int));
-				if (pp->pp_pipes[dst] == NULL)
+				    sizeof(int))) == NULL)
 					fatal("%s: calloc", __func__);
 
 				/* Mark fd as unused */
@@ -395,7 +404,7 @@ proc_kill(struct privsep *ps)
 			free(cause);
 		} else
 			log_warnx("lost child: pid %u", pid);
-	} while (pid != -1 || (pid == -1 && errno == EINTR));
+	} while (pid != -1 || errno == EINTR);
 }
 
 void
@@ -488,7 +497,7 @@ proc_shutdown(struct privsep_proc *p)
 
 	proc_close(ps);
 
-	log_info("%s, %s exiting, pid %d", getprogname(), p->p_title, getpid());
+	log_info("%s exiting, pid %d", p->p_title, getpid());
 
 	exit(0);
 }
@@ -510,7 +519,7 @@ proc_sig_handler(int sig, short event, void *arg)
 		/* ignore */
 		break;
 	default:
-		fatalx("proc_sig_handler: unexpected signal");
+		fatalx("%s: unexpected signal", __func__);
 		/* NOTREACHED */
 	}
 }
@@ -550,9 +559,9 @@ proc_run(struct privsep *ps, struct privsep_proc *p,
 		root = pw->pw_dir;
 
 	if (chroot(root) == -1)
-		fatal("proc_run: chroot");
+		fatal("%s: chroot", __func__);
 	if (chdir("/") == -1)
-		fatal("proc_run: chdir(\"/\")");
+		fatal("%s: chdir(\"/\")", __func__);
 
 	privsep_process = p->p_id;
 
@@ -561,7 +570,7 @@ proc_run(struct privsep *ps, struct privsep_proc *p,
 	if (setgroups(1, &pw->pw_gid) ||
 	    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
 	    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid))
-		fatal("proc_run: cannot drop privileges");
+		fatal("%s: cannot drop privileges", __func__);
 
 	event_init();
 
@@ -618,8 +627,7 @@ proc_dispatch(int fd, short event, void *arg)
 	ibuf = &iev->ibuf;
 
 	if (event & EV_READ) {
-		n = imsg_read(ibuf);
-		if (n == -1 && errno != EAGAIN)
+		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
 			fatal("%s: imsg_read", __func__);
 		if (n == 0) {
 			/* this pipe is dead, so remove the event handler */
@@ -630,8 +638,7 @@ proc_dispatch(int fd, short event, void *arg)
 	}
 
 	if (event & EV_WRITE) {
-		n = msgbuf_write(&ibuf->w);
-		if (n == -1 && errno != EAGAIN)
+		if ((n = msgbuf_write(&ibuf->w)) == -1 && errno != EAGAIN)
 			fatal("%s: msgbuf_write", __func__);
 		if (n == 0) {
 			/* this pipe is dead, so remove the event handler */
@@ -642,8 +649,7 @@ proc_dispatch(int fd, short event, void *arg)
 	}
 
 	for (;;) {
-		n = imsg_get(ibuf, &imsg);
-		if (n == -1)
+		if ((n = imsg_get(ibuf, &imsg)) == -1)
 			fatal("%s: imsg_get", __func__);
 		if (n == 0)
 			break;
@@ -668,7 +674,6 @@ proc_dispatch(int fd, short event, void *arg)
 		 */
 		switch (imsg.hdr.type) {
 		case IMSG_CTL_VERBOSE:
-			log_info("%s", __func__);
 			IMSG_SIZE_CHECK(&imsg, &verbose);
 			memcpy(&verbose, imsg.data, sizeof(verbose));
 			log_setverbose(verbose);
@@ -680,7 +685,7 @@ proc_dispatch(int fd, short event, void *arg)
 			    pf.pf_instance);
 			break;
 		default:
-			log_warnx("%s: %s %d got invalid imsg %d peerid %d "
+			fatalx("%s: %s %d got invalid imsg %d peerid %d "
 			    "from %s %d",
 			    __func__, title, ps->ps_instance + 1,
 			    imsg.hdr.type, imsg.hdr.peerid,
@@ -724,8 +729,8 @@ imsg_compose_event(struct imsgev *iev, uint16_t type, uint32_t peerid,
 {
 	int	ret;
 
-	ret = imsg_compose(&iev->ibuf, type, peerid, pid, fd, data, datalen);
-	if (ret == -1)
+	if ((ret = imsg_compose(&iev->ibuf, type, peerid,
+	    pid, fd, data, datalen)) == -1)
 		return (ret);
 	imsg_event_add(iev);
 	return (ret);
@@ -737,8 +742,8 @@ imsg_composev_event(struct imsgev *iev, uint16_t type, uint32_t peerid,
 {
 	int	ret;
 
-	ret = imsg_composev(&iev->ibuf, type, peerid, pid, fd, iov, iovcnt);
-	if (ret == -1)
+	if ((ret = imsg_composev(&iev->ibuf, type, peerid,
+	    pid, fd, iov, iovcnt)) == -1)
 		return (ret);
 	imsg_event_add(iev);
 	return (ret);
@@ -837,8 +842,7 @@ proc_flush_imsg(struct privsep *ps, enum privsep_procid id, int n)
 
 	proc_range(ps, id, &n, &m);
 	for (; n < m; n++) {
-		ibuf = proc_ibuf(ps, id, n);
-		if (ibuf == NULL)
+		if ((ibuf = proc_ibuf(ps, id, n)) == NULL)
 			return (-1);
 		do {
 			ret = imsg_flush(ibuf);

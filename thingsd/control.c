@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2020-2021 Tracey Emery <tracey@traceyemery.net>
  * Copyright (c) 2010-2015 Reyk Floeter <reyk@openbsd.org>
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
  *
@@ -30,7 +30,6 @@
 #include <event.h>
 #include <fcntl.h>
 #include <imsg.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -48,12 +47,12 @@ void	 control_accept(int, short, void *);
 void	 control_close(struct privsep *, struct imsg *, int,
 	    struct control_sock *);
 void	 control_dispatch_imsg(int, short, void *);
-int	 control_dispatch_parent(int, struct privsep_proc *, struct imsg *);
+int	 control_dispatch_thingsd(int, struct privsep_proc *, struct imsg *);
 void	 control_imsg_forward(struct imsg *);
 void	 control_run(struct privsep *, struct privsep_proc *, void *);
 
 static struct privsep_proc procs[] = {
-	{ "parent",	PROC_PARENT,	control_dispatch_parent },
+	{ "thingsd",	PROC_PARENT,	control_dispatch_thingsd },
 };
 
 void
@@ -70,7 +69,7 @@ control_run(struct privsep *ps, struct privsep_proc *p, void *arg)
 }
 
 int
-control_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
+control_dispatch_thingsd(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
 	struct ctl_conn		*c;
 	struct privsep		*ps = p->p_ps;
@@ -82,8 +81,8 @@ control_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		bad = 1;
 	case IMSG_SHOW_PACKETS_DATA:
 	case IMSG_SHOW_PACKETS_END_DATA:
-	case IMSG_GET_INFO_PARENT_DATA:
-	case IMSG_GET_INFO_PARENT_END_DATA:
+	case IMSG_GET_INFO_THINGSD_DATA:
+	case IMSG_GET_INFO_THINGSD_END_DATA:
 	case IMSG_GET_INFO_THINGS_DATA:
 	case IMSG_GET_INFO_THINGS_END_DATA:
 	case IMSG_GET_INFO_CLIENTS_DATA:
@@ -106,7 +105,9 @@ control_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		    0, 0, -1, imsg->data, IMSG_DATA_SIZE(imsg));
 		break;
 	case IMSG_CTL_RESET:
-		/* We don't have anything to do to reset. */
+	case IMSG_CFG_DONE:
+	case IMSG_CTL_START:
+		/* don't do anything */
 		break;
 	default:
 		return (-1);
@@ -288,7 +289,7 @@ control_close(struct privsep *ps, struct imsg *imsg, int fd,
 	if (proc_compose_imsg(ps, PROC_PARENT, -1,
 	    IMSG_SHOW_PACKETS_END_DATA, 0, -1,
 	    &fd, sizeof(fd)) == -1)
-		log_warn("fd not sent to parent to close");
+		log_warn("fd not sent to thingsd to close");
 
 	msgbuf_clear(&c->iev.ibuf.w);
 	TAILQ_REMOVE(&ctl_conns, c, entry);
@@ -354,7 +355,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			break;
 
 		switch (imsg.hdr.type) {
-		case IMSG_GET_INFO_PARENT_REQUEST:
+		case IMSG_GET_INFO_THINGSD_REQUEST:
 		case IMSG_GET_INFO_THINGS_REQUEST:
 		case IMSG_GET_INFO_CLIENTS_REQUEST:
 		case IMSG_GET_INFO_SOCKETS_REQUEST:
@@ -400,7 +401,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			break;
 		case IMSG_KILL_CLIENT:
 		case IMSG_SHOW_PACKETS_REQUEST:
-		case IMSG_GET_INFO_PARENT_REQUEST:
+		case IMSG_GET_INFO_THINGSD_REQUEST:
 		case IMSG_GET_INFO_THINGS_REQUEST:
 		case IMSG_GET_INFO_CLIENTS_REQUEST:
 		case IMSG_GET_INFO_SOCKETS_REQUEST:

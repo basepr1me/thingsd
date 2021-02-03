@@ -1,5 +1,9 @@
 /*
- * Copyright (c) 2016-2019, 2020 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016-2021 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2020 Matthias Pressfreund <mpfr@fn.de>
+ * Copyright (c) 2007 - 2015 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
+ * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
  * Copyright (c) 2004 Ryan McBride <mcbride@openbsd.org>
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -21,15 +25,15 @@
  */
 
 %{
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
+#include <sys/sockio.h>
 #include <sys/stat.h>
-
-#include <net/if.h>
-#include <netinet/in.h>
-
-#include <arpa/inet.h>
 
 #include <ctype.h>
 #include <err.h>
@@ -38,7 +42,7 @@
 #include <ifaddrs.h>
 #include <imsg.h>
 #include <limits.h>
-#include <stdbool.h>
+#include <netdb.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -72,7 +76,6 @@ int		 lookup(char *);
 int		 lgetc(int);
 int		 lungetc(int);
 int		 findeol(void);
-int		 load_tls(struct thing *);
 
 TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
 struct sym {
@@ -83,6 +86,7 @@ struct sym {
 	char			*val;
 };
 
+int	 getservice(char *);
 int	 symset(const char *, const char *, int);
 char	*symget(const char *);
 
@@ -90,23 +94,25 @@ void	 clear_config(struct thingsd *xconf);
 
 static int		 errors;
 
+int		 get_addrs(const char *, struct addresslist *,
+		    struct portrange *);
+
+static struct thingsd		*thingsd;
 static struct thing		*new_thing;
-static struct subscription	*new_sub(char *);
 
 const int		 baudrates[18] = {50, 75, 110, 134, 150, 200,
 			    300, 600, 1200, 1800, 2400, 4800, 9600,
 			    38400, 57600, 76800, 115200};
 const char		*parity[4] = {"none", "odd", "even", "space"};
-struct client		*client, *tclient;
+struct client		*pclient, *tclient;
 char			 my_name[THINGSD_MAXTEXT];
 int			 my_fd, pkt_len;
 
-struct thing		*conf_new_thing(char *);
-
 typedef struct {
 	union {
-		int64_t		 number;
-		char		*string;
+		long long		 number;
+		char			*string;
+		struct portrange	 port;
 	} v;
 	int lineno;
 } YYSTYPE;
@@ -114,15 +120,16 @@ typedef struct {
 %}
 
 %token	BAUD BIND CA CERTIFICATE CIPHERS CLIENT CLIENTS CONNECT CONNECTION CRL
-%token	DATA DEFAULT DHE ECDHE ERROR HARDWARE INCLUDE INTERFACE IPADDR KEY
+%token	DATA DHE ECDHE ERROR HARDWARE INCLUDE INTERFACE IPADDR KEY
 %token	LISTEN LOCATION MAX NAME OCSP ON OPTIONAL PARITY PASSWORD PERSISTENT
 %token	PORT PREFORK PROTOCOLS RECEIVE RETRY SOFTWARE STOP SUBSCRIBE
-%token	SUBSCRIPTIONS THING THINGS TLS UDP VERBOSE
+%token	THING THINGS TCP TLS UDP VERBOSE
 
 %token	<v.string>	STRING
 %token	<v.number>	NUMBER
 %type	<v.string>	string
 %type	<v.number>	opttls
+%type	<v.port>	port
 
 %%
 
@@ -137,33 +144,89 @@ grammar		: /* empty */
 		;
 
 conf_main	: bindopts1
-		| DEFAULT PORT NUMBER {
-			thingsd_env->port = $3;
-		}
 		| maxclients
-		| maxsubs
 		| PREFORK NUMBER {
-			thingsd_env->prefork_things = $2;
+			thingsd->prefork_socks = $2;
 			if ($2 <= 0 || $2 > PROC_MAX_INSTANCES) {
 				yyerror("invalid number of preforked "
-				    "servers: %lld", $2);
+				    "sockets: %lld", $2);
 				YYERROR;
 			}
 		}
 		| thingretry
 		;
 
-bindopts1	: BIND INTERFACE STRING {
-			memcpy(&thingsd_env->iface, $3,
-			    sizeof(thingsd_env->iface));
-			free($3);
+bindopts1	: BIND TCP INTERFACE STRING {
+			if (strlcpy(thingsd->tcp_iface, $4,
+			    sizeof(thingsd->tcp_iface)) >=
+			    sizeof(thingsd->tcp_iface)) {
+				yyerror("%s: thingsd tcp_iface truncated",
+				    __func__);
+				free($4);
+				free(thingsd);
+				YYERROR;
+			}
+			if (strlcpy(thingsd->udp_iface, $4,
+			    sizeof(thingsd->udp_iface)) >=
+			    sizeof(thingsd->udp_iface)) {
+				yyerror("%s: thingsd udp_iface truncated",
+				    __func__);
+				free($4);
+				free(thingsd);
+				YYERROR;
+			}
+			free($4);
+		}
+		| BIND UDP INTERFACE STRING {
+			memset(&thingsd->udp_iface, 0,
+			    sizeof(thingsd->udp_iface));
+			if (strlcpy(thingsd->udp_iface, $4,
+			    sizeof(thingsd->udp_iface)) >=
+			    sizeof(thingsd->udp_iface)) {
+				yyerror("%s: thingsd udp_iface truncated",
+				    __func__);
+				free($4);
+				free(thingsd);
+				YYERROR;
+			}
+			free($4);
 		}
 		;
 
-bindopts2	: BIND INTERFACE STRING {
-			memcpy(&new_thing->iface, $3,
-			    sizeof(new_thing->iface));
-			free($3);
+bindopts2	: BIND TCP INTERFACE STRING {
+			if (strlcpy(new_thing->conf.tcp_iface, $4,
+			    sizeof(new_thing->conf.tcp_iface)) >=
+			    sizeof(new_thing->conf.tcp_iface)) {
+				yyerror("%s: new_thing tcp_iface truncated",
+				    __func__);
+				free($4);
+				free(new_thing);
+				YYERROR;
+			}
+			if (strlen(new_thing->conf.udp_iface) == 0) {
+				if (strlcpy(new_thing->conf.udp_iface, $4,
+				    sizeof(new_thing->conf.udp_iface)) >=
+				    sizeof(new_thing->conf.udp_iface)) {
+					yyerror("%s: new_thing udp_iface "
+					    "truncated", __func__);
+					free($4);
+					free(new_thing);
+					YYERROR;
+				}
+			}
+			free($4);
+		}
+		| BIND UDP INTERFACE STRING {
+			if (strlcpy(new_thing->conf.udp_iface, $4,
+			    sizeof(new_thing->conf.udp_iface)) >=
+			    sizeof(new_thing->conf.udp_iface)) {
+				yyerror("%s: new_thing udp_iface truncated",
+				    __func__);
+				free($4);
+				free(new_thing);
+				YYERROR;
+			}
+			free($4);
 		}
 		;
 
@@ -173,8 +236,7 @@ dosub		: SUBSCRIBE '{' optnl subopts '}'
 include		: INCLUDE STRING		{
 			struct file	*nfile;
 
-			nfile = newfile($2, 1);
-			if (nfile == NULL) {
+			if ((nfile = newfile($2, 1)) == NULL) {
 				yyerror("failed to include file %s", $2);
 				free($2);
 				YYERROR;
@@ -183,6 +245,29 @@ include		: INCLUDE STRING		{
 
 			file = nfile;
 			lungetc('\n');
+		}
+		;
+
+port		: NUMBER {
+			if ($1 <= 0 || $1 > (int)USHRT_MAX) {
+				yyerror("invalid port: %lld", $1);
+				YYERROR;
+			}
+			$$.val[0] = htons($1);
+			$$.op = 1;
+		}
+		| STRING {
+			int	 val;
+
+			if ((val = getservice($1)) == -1) {
+				yyerror("invalid port: %s", $1);
+				free($1);
+				YYERROR;
+			}
+			free($1);
+
+			$$.val[0] = val;
+			$$.op = 1;
 		}
 		;
 
@@ -196,14 +281,14 @@ locationopts1	: bindopts2
 			const int	 bauds = (sizeof(baudrates) /
 					    sizeof(const int));
 
-			new_thing->baud = -1;
+			new_thing->conf.baud = -1;
 			for (bc = 0; bc < bauds; bc++) {
 				if ($2 == baudrates[bc]) {
-					new_thing->baud = $2;
+					new_thing->conf.baud = $2;
 					continue;
 				}
 			}
-			if (new_thing->baud == -1) {
+			if (new_thing->conf.baud == -1) {
 				yyerror("baud rate syntax error");
 				YYERROR;
 			}
@@ -213,30 +298,40 @@ locationopts1	: bindopts2
 				yyerror("data bits syntax error");
 				YYERROR;
 			} else
-				new_thing->data_bits = $2;
+				new_thing->conf.data_bits = $2;
 		}
 		| HARDWARE NUMBER {
 			if ($2 > 1 || $2 < 0) {
 				yyerror("hardware syntax error");
 				YYERROR;
 			} else if ($2 > 0)
-				new_thing->hw_ctl = true;
+				new_thing->conf.hw_ctl = 1;
 		}
-		| LISTEN ON opttls PORT NUMBER {
+		| LISTEN ON opttls PORT port {
 			struct thing	*thing;
 
-			TAILQ_FOREACH(thing, thingsd_env->things, entry) {
-				if (thing->port == $5 && (thing->tls || $3)) {
-					yyerror("tls port already used");
+			TAILQ_FOREACH(thing, thingsd->things, entry) {
+				if (thing->conf.tcp_listen_port.val[0] ==
+				    $5.val[0]) {
+					yyerror("tls port already assigned");
 					YYERROR;
 				}
 			}
-			new_thing->port = $5;
+
+			new_thing->conf.tcp_listen_port.val[0] = $5.val[0];
+			new_thing->conf.tcp_listen_port.op = $5.op;
 		}
 		| maxclientssub
 		| PASSWORD STRING {
-			memcpy(&new_thing->password, $2,
-			    sizeof(new_thing->password));
+			if (strlcpy(new_thing->conf.password, $2,
+			    sizeof(new_thing->conf.password)) >=
+			    sizeof(new_thing->conf.password)) {
+				yyerror("%s: new_thing password truncated",
+				    __func__);
+				free($2);
+				free(new_thing);
+				YYERROR;
+			}
 			free($2);
 		}
 		| PARITY STRING {
@@ -246,12 +341,19 @@ locationopts1	: bindopts2
 
 			for (pc = 0; pc < parities; pc++) {
 				if (strcmp($2, parity[pc]) == 0) {
-					memcpy(&new_thing->parity, $2,
-					    sizeof(new_thing->parity));
+					if (strlcpy(new_thing->conf.parity, $2,
+					    sizeof(new_thing->conf.parity)) >=
+					    sizeof(new_thing->conf.parity)) {
+						yyerror("%s: new_thing parity "
+						    "truncated", __func__);
+						free($2);
+						free(new_thing);
+						YYERROR;
+					}
 					continue;
 				}
 			}
-			if (strlen(new_thing->parity) == 0) {
+			if (strlen(new_thing->conf.parity) == 0) {
 				free($2);
 				yyerror("parity syntax error");
 				YYERROR;
@@ -263,17 +365,17 @@ locationopts1	: bindopts2
 				yyerror("software syntax error");
 				YYERROR;
 			} else
-				new_thing->sw_ctl = true;
+				new_thing->conf.sw_ctl = 1;
 		}
 		| STOP NUMBER {
 			if ($2 > 2 || $2 < 1) {
 				yyerror("stop bits syntax error");
 				YYERROR;
 			} else if ($2 > 0)
-				new_thing->stop_bits = $2;
+				new_thing->conf.stop_bits = $2;
 		}
 		| TLS tlsopts {
-			if (new_thing->tls == false) {
+			if (new_thing->conf.tls == 0) {
 				yyerror("tls options without tls listener");
 				YYERROR;
 			}
@@ -285,31 +387,19 @@ locationopts2	: locationopts2 locationopts1 nl
 		;
 
 maxclients	: MAX CLIENTS NUMBER {
-			thingsd_env->max_clients = $3;
+			thingsd->max_clients = $3;
 		}
 		;
 
 maxclientssub	: MAX CLIENTS NUMBER {
-			new_thing->max_clients = $3;
-		}
-		;
-
-maxsubs		: MAX SUBSCRIPTIONS NUMBER {
-			thingsd_env->max_subs = $3;
+			new_thing->conf.max_clients = $3;
 		}
 		;
 
 name		: NAME optcomma STRING {
-			/* test we're us and set name */
-			TAILQ_FOREACH(client, thingsd_env->clients, entry) {
-				if (client == tclient) {
-					memset(&my_name, 0, sizeof(my_name));
-					memcpy(&client->name, $3,
-					    sizeof(client->name));
-					memcpy(&my_name, $3, sizeof(my_name));
-					break;
-				}
-			}
+			memset(&my_name, 0, sizeof(my_name));
+			memcpy(&pclient->name, $3, sizeof(pclient->name));
+			memcpy(&my_name, $3, sizeof(my_name));
 			free($3);
 		}
 		;
@@ -327,43 +417,72 @@ optnl		: '\n' optnl		/* zero or more newlines */
 
 opttls		: /* empty */ {
 			$$ = 0;
-			new_thing->tls = false;
+			new_thing->conf.tls = 0;
 		}
 		| TLS {
 			$$ = 1;
-			new_thing->tls = true;
+			new_thing->conf.tls = 1;
 		}
 		;
 
-socketopts1	: CONNECT ON PORT NUMBER {
-			new_thing->conn_port = $4;
+socketopts1	: CONNECT ON PORT port {
+			new_thing->conf.tcp_conn_port.val[0] = $4.val[0];
+			new_thing->conf.tcp_conn_port.op = $4.op;
 		}
-		| LISTEN ON opttls PORT NUMBER {
+		| LISTEN ON opttls PORT port {
 			struct thing	*thing;
-			TAILQ_FOREACH(thing, thingsd_env->things, entry) {
-				if (thing->port == $5 && (thing->tls || $3)) {
-					yyerror("tls port already used");
+			TAILQ_FOREACH(thing, thingsd->things, entry) {
+				if (thing->conf.tcp_listen_port.val[0] ==
+				    $5.val[0]) {
+					yyerror("port already assigned");
 					YYERROR;
 				}
 			}
-			new_thing->port = $5;
+
+			new_thing->conf.tcp_listen_port.val[0] = $5.val[0];
+			new_thing->conf.tcp_listen_port.op = $5.op;
 		}
-		| RECEIVE ON PORT NUMBER {
-			new_thing->rcv_port = $4;
+		| RECEIVE ON PORT port {
+			struct thing *thing;
+			TAILQ_FOREACH(thing, thingsd_env->things, entry) {
+				if (thing->conf.udp_rcv_port.val[0] == 0 ||
+				    $4.val[0] == 0)
+					continue;
+				if (thing->conf.udp_rcv_port.val[0] ==
+				    $4.val[0]) {
+					yyerror("UDP thing receive ports must "
+					   "be unique");
+					   YYERROR;
+				}
+			}
+			new_thing->conf.udp_rcv_port.val[0] = $4.val[0];
+			new_thing->conf.udp_rcv_port.op = $4.op;
+
+			/* if((new_thing->conf.udp_rcv_port = */
+			/*     strdup($4)) == NULL) */
+			/* 	fatal("%s: strdup", __func__); */
+			/* free($4); */
 		}
 		| PASSWORD STRING {
-			memcpy(&new_thing->password, $2,
-			    sizeof(new_thing->password));
+			if (strlcpy(new_thing->conf.password, $2,
+			    sizeof(new_thing->conf.password)) >=
+			    sizeof(new_thing->conf.password)) {
+				yyerror("%s: new_thing password truncated",
+				    __func__);
+				free($2);
+				free(new_thing);
+				YYERROR;
+			}
 			free($2);
 		}
 		| PERSISTENT NUMBER {
 			if ($2)
-				new_thing->persist = true;
+				new_thing->conf.persist = 1;
 			else
-				new_thing->persist = false;
+				new_thing->conf.persist = 0;
 		}
 		| TLS tlsopts {
-			if (new_thing->tls == false) {
+			if (new_thing->conf.tls == 0) {
 				yyerror("tls options without tls listener");
 				YYERROR;
 			}
@@ -393,60 +512,75 @@ subopts		: {
 		} '{' name '}' optcomma '{' things '}'
 		;
 
-subthings	: THING '{' STRING optcomma STRING '}' optcomma {
-			struct thing		*thing = NULL;
-			struct subscription	*sub, *nsub;
-			bool			 fail = false;
+subthings	: THING '{' STRING optcomma STRING '}' {
+			struct socket	*sock = pclient->sock, *tsock;
+			struct socket	*psock = NULL, *csock = NULL;
+			struct client	*clt;
 
-			/* check for duplicate name and subscriptions */
-			TAILQ_FOREACH(client, thingsd_env->clients, entry) {
-				if (strlen(client->name) == 0 ||
-				    strlen(my_name) == 0)
-					continue;
-				if (strcmp(client->name, my_name) == 0) {
-					if (my_fd != client->fd) {
-						fail = true;
+			/* check thing name */
+			if ((strcmp(sock->conf.thing_name, $3)) != 0)
+				goto done;
+
+			/* check we have the password */
+			if (strcmp(sock->conf.password, $5) != 0)
+				goto done;
+
+			/* check that ports match */
+			if (sock->conf.port.val[0] != pclient->port.val[0])
+				goto done;
+
+			/*
+			 * XXX: check from here down don't actually work
+			 * when prefork is > 1
+			 * come back and figure this out later
+			 * probably a way to loop through the processes and
+			 * check all
+			 */
+
+			/* check for duplicate name on socket */
+			TAILQ_FOREACH(tsock, thingsd_env->sockets, entry) {
+				TAILQ_FOREACH(clt, tsock->clients, entry) {
+					if (strcmp(clt->name, my_name) == 0 &&
+					    clt->subscribed) {
 						log_warnx("client exists");
+						goto done;
 					}
-					TAILQ_FOREACH(sub,
-					    client->subscriptions, entry)
-						if (strcmp(sub->thing_name,
-						    $3) == 0)
-							fail = true;
-					break;
 				}
 			}
 
-			if (fail)
-				goto done;
-
-			TAILQ_FOREACH(thing, thingsd_env->things, entry) {
-				if (thing->port != client->port) {
-					fail = true;
-					continue;
-				}
-				if (strcmp(thing->name, $3) == 0) {
-					fail = false;
-					break;
-				}
+			/* check parent/child counts */
+			if (sock->conf.child_id) {
+				TAILQ_FOREACH(csock, thingsd_env->sockets,
+				    entry)
+					if (csock->conf.id ==
+					    sock->conf.child_id)
+						break;
+			}
+			if (sock->conf.parent_id) {
+				TAILQ_FOREACH(psock, thingsd_env->sockets,
+				    entry)
+					if (psock->conf.id ==
+					    sock->conf.parent_id)
+						break;
 			}
 
-			if (thing == NULL || fail)
-				goto done;
+			/* if counts are fine, subscribe client */
+			if (sock->conf.max_clients > 0 &&
+			    (sock->client_cnt + 1 >
+			    sock->conf.max_clients)) {
+				log_debug("max clients reached for listener %d",
+				    sock->conf.id);
+			} else {
+				pclient->subscribed = 1;
 
-			if (strcmp(thing->password, $5) == 0) {
-				if (client->subs++ >= thingsd_env->max_subs)
-					log_warn("max subscriptions reached");
-				else {
-					client->subscribed = true;
-					nsub = new_sub(thing->name);
-					TAILQ_INSERT_TAIL(
-					    client->subscriptions, nsub, entry);
-					client->le++;
-					thing->client_cnt++;
-					log_info("client %s subscribed to %s",
-					    client->name, thing->name);
-				}
+				sock->client_cnt++;
+				if (csock != NULL)
+					csock->client_cnt++;
+				if (psock != NULL)
+					psock->client_cnt++;
+
+				log_debug("client %s subscribed to %s",
+				    pclient->name, $3);
 			}
 done:
 			free($3);
@@ -459,80 +593,164 @@ subthings2	: subthings2 subthings
 		;
 
 thing		: THING STRING {
-			new_thing = conf_new_thing($2);
+       			thing_id++;
+			new_thing = thingsd_conf_new_thing(thingsd_env, NULL,
+			    $2, thing_id);
 
-			if (strlen(thingsd_env->iface) != 0) {
-				memcpy(&new_thing->iface, thingsd_env->iface,
-				    sizeof(new_thing->iface));
-			} else
-				memset(new_thing->iface, 0,
-				    sizeof(new_thing->iface));
-
-			memset(new_thing->location, 0,
-			    sizeof(new_thing->location));
-			memset(new_thing->ipaddr, 0, sizeof(new_thing->ipaddr));
-			memset(new_thing->udp, 0, sizeof(new_thing->udp));
-			memset(new_thing->password, 0,
-			    sizeof(new_thing->password));
-			memset(new_thing->parity, 0, sizeof(new_thing->parity));
-
-			new_thing->max_clients = thingsd_env->max_clients;
-			new_thing->port = thingsd_env->port;
-			new_thing->baud = DEFAULT_BAUD;
-			new_thing->conn_port = -1;
-			new_thing->data_bits = -1;
-			new_thing->stop_bits = -1;
-			new_thing->hw_ctl = false;
-			new_thing->sw_ctl = false;
-			new_thing->persist = true;
-
-			new_thing->tls_protocols = TLS_PROTOCOLS_DEFAULT;
-			new_thing->tls_flags = 0;
-
-			memset(new_thing->tls_cert_file, 0,
-			    sizeof(new_thing->tls_cert_file));
-			memcpy(&new_thing->tls_cert_file, TLS_CERT,
-			    sizeof(new_thing->tls_cert_file));
-			memset(new_thing->tls_key_file, 0,
-			    sizeof(new_thing->tls_key_file));
-			memcpy(&new_thing->tls_key_file, TLS_KEY,
-			    sizeof(new_thing->tls_key_file));
-			memcpy(&new_thing->tls_ciphers, TLS_CIPHERS,
-			    sizeof(new_thing->tls_ciphers));
-			memcpy(&new_thing->tls_dhe_params, TLS_DHE_PARAMS,
-			    sizeof(new_thing->tls_dhe_params));
-			memcpy(&new_thing->tls_ecdhe_curves,
-			    TLS_ECDHE_CURVES,
-			    sizeof(new_thing->tls_ecdhe_curves));
-			free($2);
-		} '{' optnl thingopts2 '}' {
-			if (strlen(new_thing->ipaddr) != 0 &&
-			    new_thing->conn_port == -1) {
-				yyerror("ipaddr connect port empty");
+			if (strlcpy(new_thing->conf.name, $2,
+			    sizeof(new_thing->conf.name)) >=
+			    sizeof(new_thing->conf.name)) {
+				yyerror("thing name truncated");
+				free($2);
+				free(new_thing);
 				YYERROR;
 			}
-			if (strlen(new_thing->ipaddr) != 0 &&
-			    strlen(new_thing->location) != 0) {
+
+			if (strlcpy(new_thing->conf.name, $2,
+			    sizeof(new_thing->conf.name)) >=
+			    sizeof(new_thing->conf.name)) {
+				yyerror("thing name truncated");
+				free($2);
+				free(new_thing);
+				YYERROR;
+			}
+
+			new_thing->exists = 0;
+			new_thing->fd = -1;
+			new_thing->conf.id = thing_id;
+
+			if (strlen(thingsd->tcp_iface) != 0) {
+				if (strlcpy(new_thing->conf.tcp_iface,
+				    thingsd->tcp_iface,
+				    sizeof(new_thing->conf.tcp_iface)) >=
+				    sizeof(new_thing->conf.tcp_iface)) {
+					yyerror("%s: new_thing tcp_iface "
+					    "truncated",
+					    __func__);
+					free(new_thing);
+					YYERROR;
+				}
+			} else
+				memset(new_thing->conf.tcp_iface, 0,
+				    sizeof(new_thing->conf.tcp_iface));
+
+			if ((new_thing->conf.tcp_al = calloc(1,
+			    sizeof(*new_thing->conf.tcp_al))) == NULL)
+				fatalx("%s: calloc", __func__);
+
+			TAILQ_INIT(new_thing->conf.tcp_al);
+
+			if ((new_thing->conf.udp_al = calloc(1,
+			    sizeof(*new_thing->conf.udp_al))) == NULL)
+				fatalx("%s: calloc", __func__);
+
+			TAILQ_INIT(new_thing->conf.udp_al);
+
+			if (strlen(thingsd->udp_iface) != 0) {
+				if (strlcpy(new_thing->conf.udp_iface,
+				    thingsd->udp_iface,
+				    sizeof(new_thing->conf.udp_iface)) >=
+				    sizeof(new_thing->conf.udp_iface)) {
+					yyerror("%s: new_thing udp_iface "
+					    "truncated",
+					    __func__);
+					free(new_thing);
+					YYERROR;
+				}
+			} else
+				memset(new_thing->conf.udp_iface, 0,
+				    sizeof(new_thing->conf.udp_iface));
+
+			memset(new_thing->conf.location, 0,
+			    sizeof(new_thing->conf.location));
+			memset(new_thing->conf.ipaddr, 0,
+			    sizeof(new_thing->conf.ipaddr));
+			memset(new_thing->conf.udp, 0,
+			    sizeof(new_thing->conf.udp));
+			memset(new_thing->conf.password, 0,
+			    sizeof(new_thing->conf.password));
+			memset(new_thing->conf.parity, 0,
+			    sizeof(new_thing->conf.parity));
+
+			new_thing->conf.max_clients = thingsd->max_clients;
+
+			new_thing->conf.baud = DEFAULT_BAUD;
+			new_thing->conf.data_bits = -1;
+			new_thing->conf.stop_bits = -1;
+			new_thing->conf.hw_ctl = 0;
+			new_thing->conf.sw_ctl = 0;
+			new_thing->conf.persist = 1;
+
+			new_thing->conf.tls_protocols = TLS_PROTOCOLS_DEFAULT;
+			new_thing->conf.tls_flags = 0;
+
+			memset(new_thing->conf.tls_ciphers, 0,
+			    sizeof(new_thing->conf.tls_ciphers));
+			memset(new_thing->conf.tls_dhe_params, 0,
+			    sizeof(new_thing->conf.tls_dhe_params));
+			memset(new_thing->conf.tls_ecdhe_curves, 0,
+			    sizeof(new_thing->conf.tls_ecdhe_curves));
+
+			if((new_thing->conf.tls_cert_file =
+			    strdup(TLS_CERT)) == NULL)
+				fatal("%s: strdup", __func__);
+			if((new_thing->conf.tls_key_file =
+			    strdup(TLS_KEY)) == NULL)
+				fatal("%s: strdup", __func__);
+
+			strlcpy(new_thing->conf.tls_ciphers, TLS_CIPHERS,
+			    sizeof(new_thing->conf.tls_ciphers));
+			strlcpy(new_thing->conf.tls_dhe_params, TLS_DHE_PARAMS,
+			    sizeof(new_thing->conf.tls_dhe_params));
+			strlcpy(new_thing->conf.tls_ecdhe_curves,
+			    TLS_ECDHE_CURVES,
+			    sizeof(new_thing->conf.tls_ecdhe_curves));
+			free($2);
+
+		} '{' optnl thingopts2 '}' {
+			if (new_thing->conf.tcp_listen_port.val[0] == 0) {
+				yyerror("thing listen port required");
+				YYERROR;
+			}
+			if (strlen(new_thing->conf.ipaddr) != 0 &&
+			    new_thing->conf.tcp_conn_port.val[0] == 0) {
+				yyerror("ipaddr connect port required");
+				YYERROR;
+			}
+			if (strlen(new_thing->conf.ipaddr) != 0 &&
+			    strlen(new_thing->conf.location) != 0) {
 				yyerror("too many ipaddr device arguments");
 				YYERROR;
 			}
-			if (strlen(new_thing->udp) != 0 &&
-			    new_thing->rcv_port == -1) {
-				yyerror("udp receive port empty");
+			if (strlen(new_thing->conf.udp) != 0 &&
+			    strlen(new_thing->conf.udp_iface) == 0) {
+				yyerror("udp bind interface required");
 				YYERROR;
 			}
-			if (strlen(new_thing->udp) != 0 &&
-			    strlen(new_thing->location) != 0) {
+			if (strlen(new_thing->conf.udp) != 0 &&
+			    new_thing->conf.udp_rcv_port.val[0] == 0) {
+				yyerror("udp receive port required");
+				YYERROR;
+			}
+			if (strlen(new_thing->conf.udp) != 0 &&
+			    strlen(new_thing->conf.location) != 0) {
 				yyerror("too many udp device arguments");
 				YYERROR;
 			}
-			if (thingsd_env->port == 0) {
-				yyerror("could not set default port");
+
+			if (get_addrs(new_thing->conf.tcp_iface,
+			    new_thing->conf.tcp_al,
+			    &new_thing->conf.tcp_listen_port) == -1) {
+				yyerror("could not get tcp iface addrs");
 				YYERROR;
 			}
-			if (new_thing->tls)
-				if (load_tls(new_thing) == -2)
-					YYABORT;
+
+			if (get_addrs(new_thing->conf.udp_iface,
+			    new_thing->conf.udp_al,
+			    &new_thing->conf.udp_rcv_port) == -1) {
+				yyerror("could not get udp iface addrs");
+				YYERROR;
+			}
 		}
 		;
 
@@ -541,17 +759,42 @@ thingopts1	: IPADDR STRING {
 				yyerror("ipaddr string empty");
 				YYERROR;
 			}
-			memcpy(&new_thing->ipaddr, $2,
-			    sizeof(new_thing->ipaddr));
+			if (strlcpy(new_thing->conf.ipaddr, $2,
+			    sizeof(new_thing->conf.ipaddr)) >=
+			    sizeof(new_thing->conf.ipaddr)) {
+				yyerror("%s: new_thing ipaddr truncated",
+				    __func__);
+				free($2);
+				free(new_thing);
+				YYERROR;
+			}
+			new_thing->conf.type = S_TCP;
 			free($2);
 		} '{' optnl socketopts2 '}'
 		| LOCATION STRING {
-			memcpy(&new_thing->location, $2,
-			    sizeof(new_thing->location));
+			if (strlcpy(new_thing->conf.location, $2,
+			    sizeof(new_thing->conf.location)) >=
+			    sizeof(new_thing->conf.location)) {
+				yyerror("%s: new_thing location truncated",
+				    __func__);
+				free($2);
+				free(new_thing);
+				YYERROR;
+			}
+			new_thing->conf.type = S_DEV;
 			free($2);
 		} locationopts
 		| UDP STRING {
-			memcpy(&new_thing->udp, $2, sizeof(new_thing->udp));
+			if (strlcpy(new_thing->conf.udp, $2,
+			    sizeof(new_thing->conf.udp)) >=
+			    sizeof(new_thing->conf.udp)) {
+				yyerror("%s: new_thing udp truncated",
+				    __func__);
+				free($2);
+				free(new_thing);
+				YYERROR;
+			}
+			new_thing->conf.type = S_UDP;
 			free($2);
 		} '{' optnl socketopts2 '}'
 		;
@@ -562,7 +805,7 @@ thingopts2	: thingopts2 thingopts1 nl
 
 thingretry	: CONNECTION RETRY NUMBER {
 			if ($3 >= MIN_RETRY && $3 <= MAX_RETRY)
-				thingsd_env->conn_retry = $3;
+				thingsd->conn_retry = $3;
 		}
 		;
 
@@ -571,55 +814,77 @@ things		: THINGS '{' subthings2 '}'
 
 tlscltopt	: /* empty */
 		| tlscltopt CRL STRING {
-			new_thing->tls_flags = TLSFLAG_CRL;
-			memcpy(&new_thing->tls_crl_file, $3,
-			    sizeof(new_thing->tls_crl_file));
+			new_thing->conf.tls_flags = TLSFLAG_CRL;
+			free(new_thing->conf.tls_crl_file);
+			if ((new_thing->conf.tls_crl_file = strdup($3)) == NULL)
+				fatal("%s: strdup", __func__);
 			free($3);
 		}
 		| tlscltopt OPTIONAL {
-			new_thing->tls_flags |= TLSFLAG_OPTIONAL;
+			new_thing->conf.tls_flags |= TLSFLAG_OPTIONAL;
 		}
 		;
 
 tlsopts		: CERTIFICATE STRING {
-			memcpy(&new_thing->tls_cert_file, $2,
-			    sizeof(new_thing->tls_cert_file));
+			free(new_thing->conf.tls_cert_file);
+			if ((new_thing->conf.tls_cert_file =
+			    strdup($2)) == NULL)
+				fatal("%s: strdup", __func__);
 			free($2);
 		}
 		| CIPHERS STRING {
-			memcpy(&new_thing->tls_ciphers, $2,
-			    sizeof(new_thing->tls_ciphers));
+			if (strlcpy(new_thing->conf.tls_ciphers, $2,
+			    sizeof(new_thing->conf.tls_ciphers)) >=
+			    sizeof(new_thing->conf.tls_ciphers)) {
+				yyerror("ciphers too long");
+				free($2);
+				YYERROR;
+			}
 			free($2);
 		}
 		| CLIENT CA STRING tlscltopt {
-			new_thing->tls_flags |= TLSFLAG_CA;
-			memcpy(&new_thing->tls_ca_file, $3,
-			    sizeof(new_thing->tls_ca_file));
+			new_thing->conf.tls_flags |= TLSFLAG_CA;
+			free(new_thing->conf.tls_ca_file);
+			if ((new_thing->conf.tls_ca_file = strdup($3)) == NULL)
+				fatal("%s: strdup", __func__);
 			free($3);
 		}
 		| DHE STRING {
-			memcpy(&new_thing->tls_dhe_params, $2,
-			    sizeof(new_thing->tls_dhe_params));
+			if (strlcpy(new_thing->conf.tls_dhe_params, $2,
+			    sizeof(new_thing->conf.tls_dhe_params)) >=
+			    sizeof(new_thing->conf.tls_dhe_params)) {
+				yyerror("dhe too long");
+				free($2);
+				YYERROR;
+			}
 			free($2);
 		}
 		| ECDHE STRING {
-			memcpy(&new_thing->tls_ecdhe_curves, $2,
-			    sizeof(new_thing->tls_ecdhe_curves));
+			if (strlcpy(new_thing->conf.tls_ecdhe_curves, $2,
+			    sizeof(new_thing->conf.tls_ecdhe_curves)) >=
+			    sizeof(new_thing->conf.tls_ecdhe_curves)) {
+				yyerror("ecdhe too long");
+				free($2);
+				YYERROR;
+			}
 			free($2);
 		}
 		| KEY STRING {
-			memcpy(&new_thing->tls_key_file, $2,
-			    sizeof(new_thing->tls_key_file));
+			free(new_thing->conf.tls_key_file);
+			if ((new_thing->conf.tls_key_file = strdup($2)) == NULL)
+				fatal("%s: strdup", __func__);
 			free($2);
 		}
 		| OCSP STRING {
-			memcpy(&new_thing->tls_ocsp_staple_file, $2,
-			    sizeof(new_thing->tls_ocsp_staple_file));
+			free(new_thing->conf.tls_ocsp_staple_file);
+			if ((new_thing->conf.tls_ocsp_staple_file =
+			    strdup($2)) == NULL)
+				fatal("%s: strdup", __func__);
 			free($2);
 		}
 		| PROTOCOLS STRING {
 			if (tls_config_parse_protocols(
-			    &new_thing->tls_protocols, $2) != 0) {
+			    &new_thing->conf.tls_protocols, $2) != 0) {
 				yyerror("invalid tls protocols");
 				free($2);
 				YYERROR;
@@ -630,7 +895,7 @@ tlsopts		: CERTIFICATE STRING {
 
 varset		: STRING '=' string		{
 			char *s = $1;
-			if (thingsd_env->thingsd_verbose)
+			if (thingsd->thingsd_verbose)
 				printf("%s = \"%s\"\n", $1, $3);
 			while (*s++) {
 				if (isspace((unsigned char)*s)) {
@@ -691,7 +956,6 @@ lookup(char *s)
 		{ "connection",		CONNECTION },
 		{ "crl",		CRL },
 		{ "data",		DATA },
-		{ "default",		DEFAULT },
 		{ "dhe",		DHE },
 		{ "ecdhe",		ECDHE },
 		{ "hardware",		HARDWARE },
@@ -717,7 +981,7 @@ lookup(char *s)
 		{ "software",		SOFTWARE },
 		{ "stop",		STOP },
 		{ "subscribe",		SUBSCRIBE },
-		{ "subscriptions",	SUBSCRIPTIONS },
+		{ "tcp",		TCP },
 		{ "thing",		THING },
 		{ "things",		THINGS },
 		{ "tls",		TLS },
@@ -751,11 +1015,10 @@ lgetc(int quotec)
 		/* Read character from the parsebuffer instead of input. */
 		if (parseindex >= 0) {
 			if (parsebuf == NULL)
-				return(0);
+				return (0);
 			if (parseindex > pkt_len)
-				return(0);
-			c = parsebuf[parseindex++];
-			if (c != '\0')
+				return (0);
+			if ((c = parsebuf[parseindex++]) != '\0')
 				return (c);
 			parsebuf = NULL;
 		} else
@@ -781,8 +1044,7 @@ lgetc(int quotec)
 
 	if (parseindex == 0) {
 		while ((c = getc(file->stream)) == '\\') {
-			next = getc(file->stream);
-			if (next != '\n') {
+			if ((next = getc(file->stream)) != '\n') {
 				c = next;
 				break;
 			}
@@ -853,8 +1115,7 @@ top:
 			; /* nothing */
 	if (c == '$' && parsebuf == NULL) {
 		while (1) {
-			c = lgetc(0);
-			if (c == EOF)
+			if ((c = lgetc(0)) == EOF)
 				return (0);
 
 			if (p + 1 >= buf + sizeof(buf) - 1) {
@@ -869,8 +1130,7 @@ top:
 			lungetc(c);
 			break;
 		}
-		val = symget(buf);
-		if (val == NULL) {
+		if ((val = symget(buf)) == NULL) {
 			yyerror("macro '%s' not defined", buf);
 			return (findeol());
 		}
@@ -884,15 +1144,13 @@ top:
 	case '"':
 		quotec = c;
 		while (1) {
-			c = lgetc(quotec);
-			if (c == EOF)
+			if ((c = lgetc(quotec)) == EOF)
 				return (0);
 			if (c == '\n') {
 				file->lineno++;
 				continue;
 			} else if (c == '\\') {
-				next = lgetc(quotec);
-				if (next == EOF)
+				if ((next = lgetc(quotec)) == EOF)
 					return (0);
 				if (next == quotec || c == ' ' || c == '\t')
 					c = next;
@@ -914,8 +1172,7 @@ top:
 			}
 			*p++ = c;
 		}
-		yylval.v.string = strdup(buf);
-		if (yylval.v.string == NULL)
+		if ((yylval.v.string = strdup(buf)) == NULL)
 			err(1, "yylex: strdup");
 		return (STRING);
 	}
@@ -972,8 +1229,7 @@ nodigits:
 		} while ((c = lgetc(0)) != EOF && (allowed_in_string(c)));
 		lungetc(c);
 		*p = '\0';
-		token = lookup(buf);
-		if (token == STRING) {
+		if ((token = lookup(buf)) == STRING) {
 			yylval.v.string = strdup(buf);
 			if (yylval.v.string == NULL)
 				err(1, "yylex: strdup");
@@ -1014,19 +1270,16 @@ newfile(const char *name, int secret)
 {
 	struct file	*nfile;
 
-	nfile = calloc(1, sizeof(struct file));
-	if (nfile == NULL) {
+	if ((nfile = calloc(1, sizeof(struct file))) == NULL) {
 		log_warn("calloc");
 		return (NULL);
 	}
-	nfile->name = strdup(name);
-	if (nfile->name == NULL) {
+	if ((nfile->name = strdup(name)) == NULL) {
 		log_warn("strdup");
 		free(nfile);
 		return (NULL);
 	}
-	nfile->stream = fopen(nfile->name, "r");
-	if (nfile->stream == NULL) {
+	if ((nfile->stream = fopen(nfile->name, "r")) == NULL) {
 		log_warn("%s", nfile->name);
 		free(nfile->name);
 		free(nfile);
@@ -1047,19 +1300,16 @@ newbuff(u_char *pkt)
 {
 	struct file	*bfile;
 
-	bfile = calloc(1, sizeof(struct file));
-	if (bfile == NULL) {
+	if ((bfile = calloc(1, sizeof(struct file))) == NULL) {
 		log_warn("calloc");
 		return (NULL);
 	}
-	bfile->name = strdup("subscribe buffer");
-	if (bfile->name == NULL) {
+	if ((bfile->name = strdup("subscribe buffer")) == NULL) {
 		log_warn("strdup");
 		free(bfile);
 		return (NULL);
 	}
-	parsebuf = pkt;
-	if (parsebuf == NULL) {
+	if ((parsebuf = pkt) == NULL) {
 		log_warn("%s", bfile->name);
 		free(bfile->name);
 		free(bfile);
@@ -1085,27 +1335,30 @@ closebuff(struct file *xfile)
 }
 
 int
-parse_config(const char *filename)
+parse_config(const char *filename, struct thingsd *env)
 {
 	struct sym	*sym, *next;
 
-	file = newfile(filename, 0);
-	if (file == NULL) {
+	if ((file = newfile(filename, 0)) == NULL) {
 		log_warn("failed to open %s", filename);
 		return (0);
 	}
 
-	TAILQ_INIT(thingsd_env->things);
-	thingsd_env->client_fptr = client_do_chk;
-	thingsd_env->conn_retry = CONN_RETRY;
-	thingsd_env->dead_things->run = 1;
+	if (config_init(env) == -1)
+		fatal("failed to initialize configuration");
+
+	thingsd = env;
+
+	thingsd->conn_retry = CONN_RETRY;
+	/* thingsd->dead_things->run = 1; */
+	thingsd->run = 1;
 
 	yyparse();
 	errors = file->errors;
 	closefile(file);
 	/* Free macros and check which have not been used. */
 	TAILQ_FOREACH_SAFE(sym, &symhead, entry, next) {
-		if ((thingsd_env->thingsd_verbose > 1) && !sym->used)
+		if ((thingsd->thingsd_verbose > 1) && !sym->used)
 			fprintf(stderr, "warning: macro '%s' not used\n",
 			    sym->nam);
 		if (!sym->persist) {
@@ -1118,6 +1371,17 @@ parse_config(const char *filename)
 
 	if (errors)
 		return (-1);
+
+	/* setup our listening sockets */
+	sockets_parse_sockets(env);
+
+	/* struct socket *sock; */
+	/* TAILQ_FOREACH(sock, env->sockets, entry) { */
+	/* 	log_debug("Sock %d %s: child: %d parent: %d thing: %d", */
+	/* 	    sock->conf.id, sock->conf.iface, */
+	/* 	    sock->conf.child_id, sock->conf.parent_id, */
+	/* 	    sock->conf.thing_id); */
+	/* } */
 
 	return (0);
 }
@@ -1142,17 +1406,13 @@ symset(const char *nam, const char *val, int persist)
 			free(sym);
 		}
 	}
-	sym = calloc(1, sizeof(*sym));
-	if (sym == NULL)
+	if ((sym = calloc(1, sizeof(*sym))) == NULL)
 		return (-1);
-
-	sym->nam = strdup(nam);
-	if (sym->nam == NULL) {
+	if ((sym->nam = strdup(nam)) == NULL) {
 		free(sym);
 		return (-1);
 	}
-	sym->val = strdup(val);
-	if (sym->val == NULL) {
+	if ((sym->val = strdup(val)) == NULL) {
 		free(sym->nam);
 		free(sym);
 		return (-1);
@@ -1175,8 +1435,7 @@ cmdline_symset(char *s)
 		return (-1);
 
 	len = strlen(s) - strlen(val) + 1;
-	sym = malloc(len);
-	if (sym == NULL)
+	if ((sym = malloc(len)) == NULL)
 		fatal("%s: malloc", __func__);
 
 	memcpy(&sym, s, len);
@@ -1202,14 +1461,13 @@ symget(const char *nam)
 }
 
 int
-parse_buf(struct client *pclient, u_char *pkt, int len)
+parse_buf(struct client *client, u_char *pkt, int len)
 {
 	pkt_len = len;
-	tclient = pclient;
-	my_fd = tclient->fd;
+	pclient = client;
+	my_fd = client->fd;
 
-	file = newbuff(pkt);
-	if (file == NULL)
+	if ((file = newbuff(pkt)) == NULL)
 		return (-1);
 
 	yyparse();
@@ -1218,40 +1476,6 @@ parse_buf(struct client *pclient, u_char *pkt, int len)
 	closebuff(file);
 
 	return (errors ? -1 : 0);
-}
-
-struct subscription *
-new_sub(char *name)
-{
-	struct subscription	*sub;
-
-	sub = calloc(1, sizeof(*sub));
-	if (sub == NULL)
-		fatal("%s: calloc", __func__);
-	memset(&sub->thing_name, 0, sizeof(sub->thing_name));
-	memcpy(&sub->thing_name, name, sizeof(sub->thing_name));
-
-	return (sub);
-}
-
-struct thing *
-conf_new_thing(char *name)
-{
-	struct thing	*thing;
-
-	TAILQ_FOREACH(thing, thingsd_env->things, entry) {
-		if (strcmp(name, thing->name) == 0)
-			return (thing);
-	}
-
-	thing = calloc(1, sizeof(*thing));
-	if (thing == NULL)
-		fatal("%s: calloc", __func__);
-	memcpy(&thing->name, name, sizeof(thing->name));
-
-	TAILQ_INSERT_TAIL(thingsd_env->things, thing, entry);
-
-	return (thing);
 }
 
 void
@@ -1268,26 +1492,326 @@ clear_config(struct thingsd *xconf)
 }
 
 int
-load_tls(struct thing *thing)
+getservice(char *n)
 {
-	if (tls_load_keypair(thing) == -1) {
-		log_warnx("%s:%d: thing \"%s\": failed to load public/private"
-		    " keys", file->name, yylval.lineno, thing->name);
-		return -1;
+	struct servent	*s;
+	const char	*errstr;
+	long long	 llval;
+
+	llval = strtonum(n, 0, UINT16_MAX, &errstr);
+	if (errstr) {
+		s = getservbyname(n, "tcp");
+		if (s == NULL)
+			s = getservbyname(n, "udp");
+		if (s == NULL)
+			return (-1);
+		return (s->s_port);
 	}
-	if (tls_load_ca(thing) == -1) {
-		yyerror("failed to load ca cert(s) for thing %s", thing->name);
-		return -2;
+
+	return (htons((unsigned short)llval));
+}
+
+struct address *
+host_v4(const char *s)
+{
+	struct in_addr		 ina;
+	struct sockaddr_in	*sain;
+	struct address		*h;
+
+	memset(&ina, 0, sizeof(ina));
+	if (inet_pton(AF_INET, s, &ina) != 1)
+		return (NULL);
+
+	if ((h = calloc(1, sizeof(*h))) == NULL)
+		fatal(__func__);
+	sain = (struct sockaddr_in *)&h->ss;
+	sain->sin_len = sizeof(struct sockaddr_in);
+	sain->sin_family = AF_INET;
+	sain->sin_addr.s_addr = ina.s_addr;
+	if (sain->sin_addr.s_addr == INADDR_ANY)
+		h->prefixlen = 0; /* 0.0.0.0 address */
+	else
+		h->prefixlen = -1; /* host address */
+	return (h);
+}
+
+struct address *
+host_v6(const char *s)
+{
+	struct addrinfo		 hints, *res;
+	struct sockaddr_in6	*sa_in6;
+	struct address		*h = NULL;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET6;
+	hints.ai_socktype = SOCK_DGRAM; /* dummy */
+	hints.ai_flags = AI_NUMERICHOST;
+	if (getaddrinfo(s, "0", &hints, &res) == 0) {
+		if ((h = calloc(1, sizeof(*h))) == NULL)
+			fatal(__func__);
+		sa_in6 = (struct sockaddr_in6 *)&h->ss;
+		sa_in6->sin6_len = sizeof(struct sockaddr_in6);
+		sa_in6->sin6_family = AF_INET6;
+		memcpy(&sa_in6->sin6_addr,
+		    &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr,
+		    sizeof(sa_in6->sin6_addr));
+		sa_in6->sin6_scope_id =
+		    ((struct sockaddr_in6 *)res->ai_addr)->sin6_scope_id;
+		if (memcmp(&sa_in6->sin6_addr, &in6addr_any,
+		    sizeof(sa_in6->sin6_addr)) == 0)
+			h->prefixlen = 0; /* any address */
+		else
+			h->prefixlen = -1; /* host address */
+		freeaddrinfo(res);
 	}
-	if (tls_load_crl(thing) == -1) {
-		yyerror("failed to load crl(s) for thing %s", thing->name);
-		free(thing);
-		return -2;
+
+	return (h);
+}
+
+int
+host_dns(const char *s, struct addresslist *al, int max,
+    struct portrange *port, const char *ifname, int ipproto)
+{
+	struct addrinfo		 hints, *res0, *res;
+	int			 error, cnt = 0;
+	struct sockaddr_in	*sain;
+	struct sockaddr_in6	*sin6;
+	struct address		*h;
+
+	if ((cnt = host_if(s, al, max, port, ifname, ipproto)) != 0)
+		return (cnt);
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM; /* DUMMY */
+	hints.ai_flags = AI_ADDRCONFIG;
+	error = getaddrinfo(s, NULL, &hints, &res0);
+	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME)
+		return (0);
+	if (error) {
+		log_warnx("%s: could not parse \"%s\": %s", __func__, s,
+		    gai_strerror(error));
+		return (-1);
 	}
-	if (tls_load_ocsp(thing) == -1) {
-		yyerror("failed to load ocsp staple for thing %s", thing->name);
-		free(thing);
-		return -2;
+
+	for (res = res0; res && cnt < max; res = res->ai_next) {
+		if (res->ai_family != AF_INET &&
+		    res->ai_family != AF_INET6)
+			continue;
+		if ((h = calloc(1, sizeof(*h))) == NULL)
+			fatal(__func__);
+
+		if (port != NULL)
+			memcpy(&h->port, port, sizeof(h->port));
+		if (ifname != NULL) {
+			if (strlcpy(h->ifname, ifname, sizeof(h->ifname)) >=
+			    sizeof(h->ifname)) {
+				log_warnx("%s: interface name truncated",
+				    __func__);
+				freeaddrinfo(res0);
+				free(h);
+				return (-1);
+			}
+		}
+		if (ipproto != -1)
+			h->ipproto = ipproto;
+		h->ss.ss_family = res->ai_family;
+		h->prefixlen = -1; /* host address */
+
+		if (res->ai_family == AF_INET) {
+			sain = (struct sockaddr_in *)&h->ss;
+			sain->sin_len = sizeof(struct sockaddr_in);
+			sain->sin_addr.s_addr = ((struct sockaddr_in *)
+			    res->ai_addr)->sin_addr.s_addr;
+		} else {
+			sin6 = (struct sockaddr_in6 *)&h->ss;
+			sin6->sin6_len = sizeof(struct sockaddr_in6);
+			memcpy(&sin6->sin6_addr, &((struct sockaddr_in6 *)
+			    res->ai_addr)->sin6_addr, sizeof(struct in6_addr));
+		}
+
+		TAILQ_INSERT_HEAD(al, h, entry);
+		cnt++;
 	}
-	return 0;
+	if (cnt == max && res) {
+		log_warnx("%s: %s resolves to more than %d hosts", __func__,
+		    s, max);
+	}
+	freeaddrinfo(res0);
+	return (cnt);
+}
+
+int
+host_if(const char *s, struct addresslist *al, int max,
+    struct portrange *port, const char *ifname, int ipproto)
+{
+	struct ifaddrs		*ifap, *p;
+	struct sockaddr_in	*sain;
+	struct sockaddr_in6	*sin6;
+	struct address		*h;
+	int			 cnt = 0, af;
+
+	if (getifaddrs(&ifap) == -1)
+		fatal("getifaddrs");
+
+	/* First search for IPv4 addresses */
+	af = AF_INET;
+
+ nextaf:
+	for (p = ifap; p != NULL && cnt < max; p = p->ifa_next) {
+		if (p->ifa_addr == NULL ||
+		    p->ifa_addr->sa_family != af ||
+		    (strcmp(s, p->ifa_name) != 0 &&
+		    !is_if_in_group(p->ifa_name, s)))
+			continue;
+		if ((h = calloc(1, sizeof(*h))) == NULL)
+			fatal("calloc");
+
+		if (port != NULL)
+			memcpy(&h->port, port, sizeof(h->port));
+		if (ifname != NULL) {
+			if (strlcpy(h->ifname, ifname, sizeof(h->ifname)) >=
+			    sizeof(h->ifname)) {
+				log_warnx("%s: interface name truncated",
+				    __func__);
+				free(h);
+				freeifaddrs(ifap);
+				return (-1);
+			}
+		}
+		if (ipproto != -1)
+			h->ipproto = ipproto;
+		h->ss.ss_family = af;
+		h->prefixlen = -1; /* host address */
+
+		if (af == AF_INET) {
+			sain = (struct sockaddr_in *)&h->ss;
+			sain->sin_len = sizeof(struct sockaddr_in);
+			sain->sin_addr.s_addr = ((struct sockaddr_in *)
+			    p->ifa_addr)->sin_addr.s_addr;
+		} else {
+			sin6 = (struct sockaddr_in6 *)&h->ss;
+			sin6->sin6_len = sizeof(struct sockaddr_in6);
+			memcpy(&sin6->sin6_addr, &((struct sockaddr_in6 *)
+			    p->ifa_addr)->sin6_addr, sizeof(struct in6_addr));
+			sin6->sin6_scope_id = ((struct sockaddr_in6 *)
+			    p->ifa_addr)->sin6_scope_id;
+		}
+
+		TAILQ_INSERT_HEAD(al, h, entry);
+		cnt++;
+	}
+	if (af == AF_INET) {
+		/* Next search for IPv6 addresses */
+		af = AF_INET6;
+		goto nextaf;
+	}
+
+	if (cnt > max) {
+		log_warnx("%s: %s resolves to more than %d hosts", __func__,
+		    s, max);
+	}
+	freeifaddrs(ifap);
+	return (cnt);
+}
+
+int
+host(const char *s, struct addresslist *al, int max,
+    struct portrange *port, const char *ifname, int ipproto)
+{
+	struct address *h;
+
+	h = host_v4(s);
+
+	/* IPv6 address? */
+	if (h == NULL)
+		h = host_v6(s);
+
+	if (h != NULL) {
+		if (port != NULL)
+			memcpy(&h->port, port, sizeof(h->port));
+		if (ifname != NULL) {
+			if (strlcpy(h->ifname, ifname, sizeof(h->ifname)) >=
+			    sizeof(h->ifname)) {
+				log_warnx("%s: interface name truncated",
+				    __func__);
+				free(h);
+				return (-1);
+			}
+		}
+		if (ipproto != -1)
+			h->ipproto = ipproto;
+
+		TAILQ_INSERT_HEAD(al, h, entry);
+		return (1);
+	}
+
+	return (host_dns(s, al, max, port, ifname, ipproto));
+}
+
+int
+is_if_in_group(const char *ifname, const char *groupname)
+{
+	unsigned int		 len;
+	struct ifgroupreq	 ifgr;
+	struct ifg_req		*ifg;
+	int			 s;
+	int			 ret = 0;
+
+	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+		err(1, "socket");
+
+	memset(&ifgr, 0, sizeof(ifgr));
+	if (strlcpy(ifgr.ifgr_name, ifname, IFNAMSIZ) >= IFNAMSIZ)
+		err(1, "IFNAMSIZ");
+	if (ioctl(s, SIOCGIFGROUP, (caddr_t)&ifgr) == -1) {
+		if (errno == EINVAL || errno == ENOTTY)
+			goto end;
+		err(1, "SIOCGIFGROUP");
+	}
+
+	len = ifgr.ifgr_len;
+	ifgr.ifgr_groups = calloc(len / sizeof(struct ifg_req),
+	    sizeof(struct ifg_req));
+	if (ifgr.ifgr_groups == NULL)
+		err(1, "getifgroups");
+	if (ioctl(s, SIOCGIFGROUP, (caddr_t)&ifgr) == -1)
+		err(1, "SIOCGIFGROUP");
+
+	ifg = ifgr.ifgr_groups;
+	for (; ifg && len >= sizeof(struct ifg_req); ifg++) {
+		len -= sizeof(struct ifg_req);
+		if (strcmp(ifg->ifgrq_group, groupname) == 0) {
+			ret = 1;
+			break;
+		}
+	}
+	free(ifgr.ifgr_groups);
+
+end:
+	close(s);
+	return (ret);
+}
+
+int
+get_addrs(const char *addr, struct addresslist *al, struct portrange *port)
+{
+	if (strcmp("", addr) == 0) {
+		if (host("0.0.0.0", al, 1, port, "0.0.0.0", -1) <= 0) {
+			yyerror("invalid listen ip: %s",
+			    "0.0.0.0");
+			return (-1);
+		}
+		if (host("::", al, 1, port, "::", -1) <= 0) {
+			yyerror("invalid listen ip: %s", "::");
+			return (-1);
+		}
+	} else {
+		if (host(addr, al, THINGSD_MAXIFACE, port, addr,
+		    -1) <= 0) {
+			yyerror("invalid listen ip: %s", addr);
+			return (-1);
+		}
+	}
+	return (0);
 }

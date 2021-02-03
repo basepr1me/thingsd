@@ -11,7 +11,7 @@ CFLAGS+=	-Wall -I${.CURDIR}
 CFLAGS+=	-Wstrict-prototypes -Wmissing-prototypes
 CFLAGS+=	-Wmissing-declarations
 CFLAGS+=	-Wshadow -Wpointer-arith
-CFLAGS+=	-Wsign-compare -pthread
+CFLAGS+=	-Wsign-compare -fno-common
 CFLAGS+=	-I${.CURDIR} -I${.CURDIR}/../thingsd
 
 MAN=		thingsctl.8

@@ -17,12 +17,11 @@
 #include <sys/queue.h>
 #include <sys/time.h>
 #include <sys/socket.h>
+#include <sys/tree.h>
 
 #include <errno.h>
 #include <event.h>
 #include <imsg.h>
-#include <pthread.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <tls.h>
@@ -31,266 +30,82 @@
 #include "proc.h"
 #include "thingsd.h"
 
-#define FD_RESERVE		5
-#define FD_NEEDED		6
+extern volatile int client_inflight;
+extern enum privsep_procid privsep_process;
 
-volatile int client_inflight = 0;
-
-int		 accept_reserve(int, struct sockaddr *, socklen_t *, int,
-		    volatile int *);
-void bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t, void *);
-
-int
-accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
-    int reserve, volatile int *counter)
-{
-	int ret;
-	if (getdtablecount() + reserve +
-	    ((*counter + 1) * FD_NEEDED) >= getdtablesize()) {
-		log_debug("inflight fds exceeded");
-		errno = EMFILE;
-		return -1;
-	}
-
-	if ((ret = accept4(sockfd, addr, addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC))
-	    > -1) {
-		(*counter)++;
-		log_debug("inflight incremented, now %d", *counter);
-	}
-	return ret;
-}
+void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t,
+	    void *);
+void	 client_write_to_things(struct packages *);
 
 void
-client_accept_paused(int fd, short events, void *arg)
+client_del(struct client *client)
 {
-	struct socket		*sock = arg;
+	struct socket		*sock = client->sock;
+	struct socket		*psock = NULL, *csock = NULL;
+	struct client		*tclient, *uclient;
 
-	event_add(sock->ev, NULL);
-}
-
-void
-client_conn(int fd, short event, void *arg)
-{
-	struct sockaddr_storage	 ss;
-	struct timeval		 backoff;
-	struct client		*client = NULL;
-	struct thingsd		*env = (struct thingsd *)arg;
-	struct socket		*sock = NULL;
-	int			 client_fd;
-	socklen_t		 len = sizeof(ss);
-
-	backoff.tv_sec = 1;
-	backoff.tv_usec = 0;
-
-	sock = get_socket(env, fd);
-	if (sock == NULL)
-		return;
-
-	event_add(sock->ev, NULL);
-
-	client_fd = accept_reserve(fd, (struct sockaddr *)&ss, &len, FD_RESERVE,
-	    &client_inflight);
-	if (client_fd == -1) {
-		switch (errno) {
-		case EINTR:
-		case EWOULDBLOCK:
-		case ECONNABORTED:
-			return;
-		case EMFILE:
-		case ENFILE:
-			event_del(sock->ev);
-			evtimer_add(&sock->pause, &backoff);
-			return;
-		default:
-			log_warnx("client accept failed");
-		}
+	TAILQ_FOREACH_SAFE(tclient, sock->clients, entry, uclient) {
+		if (client->id == tclient->id)
+			TAILQ_REMOVE(sock->clients, client, entry);
 	}
+	log_debug("%s: disconnecting client %s (%d)", __func__, client->name,
+	    client->fd);
+	/* if (client->tls) */
+	/* 	tls_free(client->tls_ctx); */
 
-	client = calloc(1, sizeof(*client));
-	if (client == NULL)
-		goto err;
+	if (evtimer_initialized(&client->timeout))
+		evtimer_del(&client->timeout);
 
-	client->ev = calloc(1, sizeof(*client->ev));
-	if (client->ev == NULL)
-		goto err;
+	if (client->subscribed == 0)
+		log_debug("%s: client disconnected", __func__);
+	else
+		log_debug("client disconnected: %s", client->name);
 
-	if (sock->tls) {
-		if (tls_accept_socket(sock->tls_ctx, &client->tls_ctx,
-		    client_fd) == -1) {
-			log_warnx("tls accept failed: %s",
-			    tls_error(sock->tls_ctx));
-			goto err;
-		}
-	}
+	if (client->bev != NULL)
+		bufferevent_free(client->bev);
 
-	client->subscriptions = calloc(1, sizeof(*client->subscriptions));
-	if (client->subscriptions == NULL)
-		goto err;
-
-	TAILQ_INIT(client->subscriptions);
-
-	sock->client_cnt++;
-	env->client_cnt++;
-	if (sock->max_clients > 0 && sock->client_cnt > sock->max_clients) {
-		log_debug("%s: %s max clients reached", __func__, sock->name);
-		sock->client_cnt--;
-		env->client_cnt--;
-		goto err;
-	}
-
-	client->port = sock->port;
-	client->socket = sock;
-	client->subscribed = false;
-	client->evb = evbuffer_new();
-
-	if (client->evb == NULL) {
-		sock->client_cnt--;
-		env->client_cnt--;
-		goto err;
-	}
-
-	client->fd = client_fd;
-	client->join_time = time(NULL);
-
-	TAILQ_INSERT_TAIL(env->clients, client, entry);
-	if (sock->tls) {
-		client->tls = true;
-		event_del(client->ev);
-		event_set(client->ev, client->fd, EV_READ | EV_PERSIST,
-		    socket_tls_handshake, env);
-		event_add(client->ev, NULL);
-		return;
-	}
-
-	client_add(env, client);
-
-	return;
-err:
-	log_debug("%s: client error", __func__);
 	client_inflight--;
-	if (client_fd != -1)
-		close(client_fd);
-	if (client != NULL) {
-		if (sock->tls)
-			tls_free(client->tls_ctx);
-		if (client->subscriptions != NULL)
-			free(client->subscriptions);
-		free(client->ev);
-		free(client);
+
+	if (client->subscribed == 0)
+		goto done;
+
+	/* account for parent/child client counts */
+	if (sock->conf.child_id) {
+		TAILQ_FOREACH(csock, thingsd_env->sockets, entry)
+			if (csock->conf.id == sock->conf.child_id)
+				break;
 	}
-}
-
-void
-client_add(struct thingsd *env, struct client *client)
-{
-	struct socket 		*sock = client->socket;
-	evbuffercb		 clientrd = client_rd;
-	evbuffercb		 clientwr = client_wr;
-
-	log_debug("%s: client connected, %d", __func__, client->fd);
-
-	client->bev = bufferevent_new(client->fd, clientrd, clientwr,
-	    client_err, env);
-
-	if (client->bev == NULL) {
-		sock->client_cnt--;
-		env->client_cnt--;
-		goto err;
+	if (sock->conf.parent_id) {
+		TAILQ_FOREACH(psock, thingsd_env->sockets, entry)
+			if (psock->conf.id == sock->conf.parent_id)
+				break;
 	}
-
-	if (client->tls) {
-		event_set(&client->bev->ev_read, client->fd, EV_READ,
-		    client_tls_readcb, client->bev);
-		event_set(&client->bev->ev_write, client->fd, EV_WRITE,
-		    client_tls_writecb, client->bev);
-	}
-
-	bufferevent_setwatermark(client->bev, EV_READ, 0, PKT_BUFF);
-	bufferevent_enable(client->bev, EV_READ);
-
-	return;
-err:
-	log_debug("%s: client error", __func__);
-	if (client->fd != -1)
-		close(client->fd);
-	if (sock->tls)
-		tls_free(client->tls_ctx);
-	free(client->ev);
+	sock->client_cnt--;
+	if (csock != NULL)
+		csock->client_cnt--;
+	if (psock != NULL)
+		psock->client_cnt--;
+done:
+	close(client->fd);
 	free(client);
-}
-
-void
-client_del(struct thingsd *env, struct client *client)
-{
-	struct thing		*thing;
-	struct client		*pclient, *tclient;
-	struct subscription	*sub, *tsub;
-
-	TAILQ_FOREACH_SAFE(pclient, env->clients, entry, tclient) {
-		if (pclient->fd == client->fd) {
-			if (pclient->tls)
-				tls_free(pclient->tls_ctx);
-
-
-			TAILQ_FOREACH_SAFE(sub, pclient->subscriptions, entry,
-			    tsub) {
-				TAILQ_FOREACH(thing, env->things, entry) {
-					if (strcmp(sub->thing_name,
-					    thing->name) == 0)
-						thing->client_cnt--;
-				}
-				TAILQ_REMOVE(pclient->subscriptions, sub,
-				    entry);
-			}
-
-			env->client_cnt--;
-			pclient->socket->client_cnt--;
-
-			if (pclient->subscribed == false)
-				log_debug("%s: client disconnected", __func__);
-			else
-				log_info("client disconnected: %s",
-				    pclient->name);
-
-			if (pclient->bev != NULL)
-				bufferevent_free(pclient->bev);
-
-			client_inflight--;
-			close(pclient->fd);
-			TAILQ_REMOVE(env->clients, pclient, entry);
-			free(pclient->ev);
-			free(pclient->subscriptions);
-			free(pclient);
-			break;
-		}
-	}
 }
 
 void
 client_rd(struct bufferevent *bev, void *arg)
 {
-	struct thingsd		*env = (struct thingsd *)arg;
-	struct thing		*thing = NULL;
-	struct client		*client = NULL, *tclient;
-	struct subscription	*sub;
+	struct client		*client = (struct client *)arg;
 	size_t			 len;
-	int			 fd = bev->ev_read.ev_fd;
 	char			*pkt = NULL, *npkt = NULL;
+	struct package		*package = NULL;
 
-	TAILQ_FOREACH(tclient, env->clients, entry) {
-		if (tclient->fd == fd) {
-			client = tclient;
-			break;
-		}
-	}
-
-	if (client == NULL)
-		return;
 
 	client->evb = EVBUFFER_INPUT(bev);
 	len = EVBUFFER_LENGTH(client->evb);
 
-	if (client->subscribed == false) {
+	if (client->subscribed == 0) {
+		log_debug("%s: client connection established (%d)", __func__,
+		    client->fd);
+
 		/* allow one shot at subscription so we don't get hammered */
 		pkt = calloc(len, sizeof(*pkt));
 		if (pkt == NULL)
@@ -307,27 +122,26 @@ client_rd(struct bufferevent *bev, void *arg)
 
 		/* peak into packet and ensure it's a subscription packet */
 		if (pkt[0] == 0x7E && pkt[1] == 0x7E && pkt[2] == 0x7E) {
+			log_debug("%s: subscription packet received", __func__);
 			memmove(npkt, pkt+3, len-3);
 			parse_buf(client, npkt, len-3);
-			if (client->subscribed)
+			if (client->subscribed) {
 				bufferevent_enable(client->bev,
 				    EV_READ | EV_WRITE);
+				if (evtimer_initialized(&client->timeout))
+				       evtimer_del(&client->timeout);
+			}
 		}
 	} else if (client->subscribed) {
 		/* write to things */
-		TAILQ_FOREACH(sub, client->subscriptions, entry) {
-			TAILQ_FOREACH(thing, env->things, entry) {
-				if (strcmp(sub->thing_name, thing->name) == 0 &&
-				    client->port == thing->port) {
-					if (thing->exists)
-						client_wr_things(client, thing,
-						    len);
-					else
-						evbuffer_drain(client->evb,
-						    len);
-				}
-			}
-		}
+		if ((package = calloc(1, sizeof(*package))) == NULL)
+			return;
+		evbuffer_remove(client->evb, package->pkt, len);
+		package->thing_id = client->thing_id;
+		package->len = len;
+		TAILQ_INSERT_TAIL(thingsd_env->packages, package, entry);
+		client_write_to_things(thingsd_env->packages);
+		evbuffer_drain(client->evb, len);
 	}
 	free(pkt);
 	free(npkt);
@@ -336,108 +150,117 @@ client_rd(struct bufferevent *bev, void *arg)
 void
 client_tls_readcb(int fd, short event, void *arg)
 {
-	struct bufferevent	*bufev = (struct bufferevent *)arg;
-	struct thingsd		*env = bufev->cbarg;
-	struct client		*client = NULL, *tclient;
-	char			 pkt[PKT_BUFF];
-	ssize_t			 ret;
-	size_t			 len;
-	int			 toread = EVBUFFER_READ;
+	/* struct bufferevent	*bufev = (struct bufferevent *)arg; */
+	/* struct thingsd		*env = bufev->cbarg; */
+	/* struct client		*client = NULL, *tclient; */
+	/* char			 pkt[PKT_BUFF]; */
+	/* ssize_t			 ret; */
+	/* size_t			 len; */
+	/* int			 toread = EVBUFFER_READ; */
 
-	TAILQ_FOREACH(tclient, env->clients, entry) {
-		if (tclient->fd == fd)
-			client = tclient;
-	}
+	/* TAILQ_FOREACH(tclient, env->clients, entry) { */
+	/* 	if (tclient->fd == fd) */
+	/* 		client = tclient; */
+	/* } */
 
-	if (client == NULL)
-		return;
+	/* if (client == NULL) */
+	/* 	return; */
 
-	memset(pkt, 0, sizeof(pkt));
+	/* memset(pkt, 0, sizeof(pkt)); */
 
-	ret = tls_read(client->tls_ctx, pkt, PKT_BUFF);
-	if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) {
-		goto retry;
-	} else if (ret < 0) {
-		toread |= EVBUFFER_ERROR;
-		goto err;
-	}
+	/* ret = tls_read(client->tls_ctx, pkt, PKT_BUFF); */
+	/* if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) { */
+	/* 	goto retry; */
+	/* } else if (ret < 0) { */
+	/* 	toread |= EVBUFFER_ERROR; */
+	/* 	goto err; */
+	/* } */
 
-	len = ret;
-	if (len == 0) {
-		toread |= EVBUFFER_EOF;
-		goto err;
-	}
+	/* len = ret; */
+	/* if (len == 0) { */
+	/* 	toread |= EVBUFFER_EOF; */
+	/* 	goto err; */
+	/* } */
 
-	if (evbuffer_add(bufev->input, pkt, len) == -1) {
-		toread |= EVBUFFER_ERROR;
-		goto err;
-	}
+	/* if (evbuffer_add(bufev->input, pkt, len) == -1) { */
+	/* 	toread |= EVBUFFER_ERROR; */
+	/* 	goto err; */
+	/* } */
 
-	event_add(&bufev->ev_read, NULL);
+	/* event_add(&bufev->ev_read, NULL); */
 
-	len = EVBUFFER_LENGTH(bufev->input);
-	if (bufev->wm_read.low != 0 && len < bufev->wm_read.low)
-		return;
+	/* len = EVBUFFER_LENGTH(bufev->input); */
+	/* if (bufev->wm_read.low != 0 && len < bufev->wm_read.low) */
+	/* 	return; */
 
-	if (bufev->wm_read.high != 0 && len > bufev->wm_read.high) {
-		struct evbuffer *buf = bufev->input;
-		event_del(&bufev->ev_read);
-		evbuffer_setcb(buf, bufferevent_read_pressure_cb, bufev);
-		return;
-	}
+	/* if (bufev->wm_read.high != 0 && len > bufev->wm_read.high) { */
+	/* 	struct evbuffer *buf = bufev->input; */
+	/* 	event_del(&bufev->ev_read); */
+	/* 	evbuffer_setcb(buf, bufferevent_read_pressure_cb, bufev); */
+	/* 	return; */
+	/* } */
 
-	if (bufev->readcb != NULL)
-		(*bufev->readcb)(bufev, bufev->cbarg);
+	/* if (bufev->readcb != NULL) */
+	/* 	(*bufev->readcb)(bufev, bufev->cbarg); */
 
-	return;
-retry:
-	event_del(&bufev->ev_read);
-	event_add(&bufev->ev_read, NULL);
-	return;
-err:
-	(*bufev->errorcb)(bufev, toread, bufev->cbarg);
+	/* return; */
+/* retry: */
+	/* event_del(&bufev->ev_read); */
+	/* event_add(&bufev->ev_read, NULL); */
+	/* return; */
+/* err: */
+	/* (*bufev->errorcb)(bufev, toread, bufev->cbarg); */
 }
 
 void
-client_wr_things(struct client *client, struct thing *thing, size_t len)
+client_write_to_things(struct packages *packages)
 {
-	char			*pkt;
+	struct privsep		*ps = thingsd_env->thingsd_ps;
+	struct package		*package, *tpkg, p;
+	unsigned int		 id, what;
+	int			 fd = -1, n, m;
+	struct iovec		 iov[6];
+	size_t			 c;
 
-	pkt = calloc(len, sizeof(*pkt));
-	if (pkt == NULL)
-		return;
+	TAILQ_FOREACH_SAFE(package, packages, entry, tpkg) {
+		for (id = 0; id < PROC_MAX; id++) {
+			what = ps->ps_what[id];
 
-	switch (thing->type) {
-	case TCP:
-	case DEV:
-		if (thing->persist == false) {
-			thing->fd = open_client_socket(thing->ipaddr,
-			    thing->conn_port);
-			if (thing->fd == -1) {
-				log_warnx("%s: temporary ipaddr connection"
-				    " failed", __func__);
-				free(pkt);
-				return;
-			}
+			if ((what & CONFIG_SOCKS) == 0 || id == privsep_process)
+				continue;
 
-			evbuffer_remove(client->evb, pkt, len);
-			write(thing->fd, pkt, len);
-			close(thing->fd);
-			thing->fd = -1;
-		} else {
-			if (thing->fd != -1) {
-				bufferevent_write_buffer(thing->bev,
-				    client->evb);
-				evbuffer_drain(client->evb, len);
+			memcpy(&p, package, sizeof(p));
+
+			c = 0;
+			iov[c].iov_base = &p;
+			iov[c++].iov_len = sizeof(p);
+			if (id == PROC_PARENT) {
+			/* XXX imsg code will close the fd after 1st call */
+				n = -1;
+				proc_range(ps, id, &n, &m);
+				for (n = 0; n < m; n++) {
+					/* send thing fd */
+					if (proc_composev_imsg(ps, id, n,
+					    IMSG_DIST_CLIENT_PACKAGE, -1, fd,
+					    iov, c) != 0) {
+						log_warn("%s: failed to compose"
+						    " IMSG_DIST_THING_PACKAGE"
+						    " imsg",
+					    __func__);
+					return;
+					}
+					if (proc_flush_imsg(ps, id, n) == -1) {
+						log_warn("%s: failed to flush "
+						    "IMSG_DIST_CLIENT_PACKAGE "
+						    "imsg",
+						    __func__);
+						return;
+					}
+				}
 			}
 		}
-		free(pkt);
-		break;
-	default:
-		evbuffer_remove(client->evb, pkt, len);
-		write(thing->fd, pkt, len);
-		free(pkt);
-		break;
+		TAILQ_REMOVE(packages, package, entry);
+		free(package);
 	}
 }
 
@@ -449,160 +272,108 @@ client_wr(struct bufferevent *bev, void *arg)
 void
 client_tls_writecb(int fd, short event, void *arg)
 {
-	struct bufferevent	*bufev = (struct bufferevent *)arg;
-	struct thingsd		*env = bufev->cbarg;
-	struct client		*client = NULL, *tclient;
-	ssize_t			 ret;
-	size_t			 len;
-	int			 towrite = EVBUFFER_WRITE;
+	/* struct bufferevent	*bufev = (struct bufferevent *)arg; */
+	/* struct thingsd		*env = bufev->cbarg; */
+	/* struct client		*client = NULL, *tclient; */
+	/* ssize_t			 ret; */
+	/* size_t			 len; */
+	/* int			 towrite = EVBUFFER_WRITE; */
 
-	TAILQ_FOREACH(tclient, env->clients, entry) {
-		if (tclient->fd == fd)
-			client = tclient;
-	}
+	/* TAILQ_FOREACH(tclient, env->clients, entry) { */
+	/* 	if (tclient->fd == fd) */
+	/* 		client = tclient; */
+	/* } */
 
-	if (EVBUFFER_LENGTH(bufev->output)) {
-		if (client == NULL)
-			return;
+	/* if (EVBUFFER_LENGTH(bufev->output)) { */
+	/* 	if (client == NULL) */
+	/* 		return; */
 
-		ret = tls_write(client->tls_ctx,
-		    EVBUFFER_DATA(bufev->output),
-		    EVBUFFER_LENGTH(bufev->output));
+	/* 	ret = tls_write(client->tls_ctx, */
+	/* 	    EVBUFFER_DATA(bufev->output), */
+	/* 	    EVBUFFER_LENGTH(bufev->output)); */
 
-		if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) {
-			goto retry;
-		} else if (ret < 0) {
-			towrite |= EVBUFFER_ERROR;
-			goto err;
-		}
+	/* 	if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) { */
+	/* 		goto retry; */
+	/* 	} else if (ret < 0) { */
+	/* 		towrite |= EVBUFFER_ERROR; */
+	/* 		goto err; */
+	/* 	} */
 
-		len = ret;
-		evbuffer_drain(bufev->output, len);
-	}
+	/* 	len = ret; */
+	/* 	evbuffer_drain(bufev->output, len); */
+	/* } */
 
-	if (EVBUFFER_LENGTH(bufev->output) != 0) {
-		event_del(&bufev->ev_write);
-		event_add(&bufev->ev_write, NULL);
-	}
+	/* if (EVBUFFER_LENGTH(bufev->output) != 0) { */
+	/* 	event_del(&bufev->ev_write); */
+	/* 	event_add(&bufev->ev_write, NULL); */
+	/* } */
 
-	if (bufev->writecb != NULL && EVBUFFER_LENGTH(bufev->output) <=
-	    bufev->wm_write.low)
-		(*bufev->writecb)(bufev, bufev->cbarg);
+	/* if (bufev->writecb != NULL && EVBUFFER_LENGTH(bufev->output) <= */
+	/*     bufev->wm_write.low) */
+	/* 	(*bufev->writecb)(bufev, bufev->cbarg); */
 
-	return;
-retry:
-	event_del(&bufev->ev_write);
-	event_add(&bufev->ev_write, NULL);
-	return;
-err:
-	(*bufev->errorcb)(bufev, towrite, bufev->cbarg);
+	/* return; */
+/* retry: */
+	/* event_del(&bufev->ev_write); */
+	/* event_add(&bufev->ev_write, NULL); */
+	/* return; */
+/* err: */
+	/* (*bufev->errorcb)(bufev, towrite, bufev->cbarg); */
 }
 
 void
 client_err(struct bufferevent *bev, short error, void *arg)
 {
-	struct thingsd		*env = (struct thingsd *)arg;
-	struct client		*client;
-	int			 fd = bev->ev_read.ev_fd;
+	struct client		*client = (struct client *)arg;
 
 	if ((error & EVBUFFER_EOF) == 0)
 		log_warnx("%s: client socket error, disconnecting", __func__);
 
-	/* client disconnect */
-	TAILQ_FOREACH(client, env->clients, entry) {
-		if (client->fd == fd) {
-			client_del(env, client);
-			break;
-		}
-	}
+	client_del(client);
 }
 
-void
-client_do_chk(struct thingsd *env)
-{
-	struct client		*client;
-	time_t			 ctime = time(NULL);
+/* void */
+/* clients_show_info(struct privsep *ps, struct imsg *imsg) */
+/* { */
+/* 	char filter[THINGSD_MAXNAME]; */
+/* 	struct client	*client, nci; */
 
-	TAILQ_FOREACH(client, env->clients, entry) {
-		if (client->subscribed == false) {
-			if ((ctime - client->join_time) >= CLIENT_SUB_TIME) {
-				client_del(env, client);
-				break;
-			}
-		}
-	}
-}
+/* 	switch (imsg->hdr.type) { */
+/* 	case IMSG_GET_INFO_CLIENTS_REQUEST: */
 
-void
-*client_chk(void *arg)
-{
-	struct thingsd		*env = (struct thingsd *)arg;
-	void			(*tfptr)(struct thingsd *);
+/* 		memcpy(filter, imsg->data, sizeof(filter)); */
 
-	tfptr = env->client_fptr;
-	while(1) {
-		sleep(CLIENT_SUB_CHK);
-		(void)(*tfptr)(env);
-	}
-	pthread_exit(NULL);
-}
+/* 		TAILQ_FOREACH(client, thingsd_env->clients, entry) { */
+/* 			if (filter[0] == '\0' || memcmp(filter, */
+/* 			    client->name, sizeof(filter)) == 0) { */
 
-void
-start_client_chk(struct thingsd *env)
-{
-	pthread_t		 tclient_chk;
-	int			 rclient_chk;
+/* 				memcpy(&nci.name, client->name, */
+/* 				    sizeof(nci.name)); */
 
-	rclient_chk = pthread_create(&tclient_chk, NULL, client_chk,
-	    (void *)env);
+/* 				nci.subscribed = client->subscribed; */
+/* 				nci.fd = client->fd; */
+/* 				nci.port = client->port; */
+/* 				nci.tls = client->tls; */
+/* 				nci.subs = client->subs; */
 
-	if (rclient_chk) {
-		log_warnx("%s: thread creation failed", __func__);
-		client_chk((void *) env);
-	}
-}
+/* 				if (proc_compose_imsg(ps, PROC_CONTROL, -1, */
+/* 				    IMSG_GET_INFO_CLIENTS_DATA, */
+/* 				    imsg->hdr.peerid, -1, &nci, */
+/* 				    sizeof(nci)) == -1) */
+/* 					return; */
 
-void
-clients_show_info(struct privsep *ps, struct imsg *imsg)
-{
-	char filter[THINGSD_MAXNAME];
-	struct client	*client, nci;
+/* 			} */
+/* 		} */
 
-	switch (imsg->hdr.type) {
-	case IMSG_GET_INFO_CLIENTS_REQUEST:
+/* 		if (proc_compose_imsg(ps, PROC_CONTROL, -1, */
+/* 		    IMSG_GET_INFO_CLIENTS_END_DATA, imsg->hdr.peerid, */
+/* 			    -1, &nci, sizeof(nci)) == -1) */
+/* 				return; */
 
-		memcpy(filter, imsg->data, sizeof(filter));
+/* 		break; */
+/* 	default: */
+/* 		log_debug("%s: error handling imsg", __func__); */
+/* 		break; */
+/* 	} */
+/* } */
 
-		TAILQ_FOREACH(client, thingsd_env->clients, entry) {
-			if (filter[0] == '\0' || memcmp(filter,
-			    client->name, sizeof(filter)) == 0) {
-
-				memcpy(&nci.name, client->name,
-				    sizeof(nci.name));
-
-				nci.subscribed = client->subscribed;
-				nci.fd = client->fd;
-				nci.port = client->port;
-				nci.tls = client->tls;
-				nci.subs = client->subs;
-
-				if (proc_compose_imsg(ps, PROC_CONTROL, -1,
-				    IMSG_GET_INFO_CLIENTS_DATA,
-				    imsg->hdr.peerid, -1, &nci,
-				    sizeof(nci)) == -1)
-					return;
-
-			}
-		}
-
-		if (proc_compose_imsg(ps, PROC_CONTROL, -1,
-		    IMSG_GET_INFO_CLIENTS_END_DATA, imsg->hdr.peerid,
-			    -1, &nci, sizeof(nci)) == -1)
-				return;
-
-		break;
-	default:
-		log_debug("%s: error handling imsg", __func__);
-		break;
-	}
-}
