@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <tls.h>
 #include <unistd.h>
 
 #include "proc.h"
@@ -107,7 +108,7 @@ sockets_launch(void)
 		log_debug("%s: configuring thing listener %d (%d)", __func__,
 		    sock->conf.id, sock->fd);
 
-		/* socket_tls_init(sock); */
+		socket_tls_init(sock);
 
 		if ((sock->clients = calloc(1, sizeof(*sock->clients))) == NULL)
 			fatalx("%s: calloc", __func__);
@@ -277,6 +278,8 @@ sockets_dup_new_socket(struct socket *p_sock, struct socket *sock)
 	    sizeof(sock->conf.tls_ecdhe_curves)) >=
 	    sizeof(sock->conf.tls_ecdhe_curves))
 		fatalx("%s: strlcpy", __func__);
+
+	socket_tls_load(sock);
 }
 
 struct socket *
@@ -712,6 +715,9 @@ sockets_dispatch_thingsd(int fd, struct privsep_proc *p, struct imsg *imsg)
 
 		config_getreset(thingsd_env, imsg);
 		break;
+	case IMSG_CFG_TLS:
+		config_getsocks_tls(thingsd_env, imsg);
+		break;
 	case IMSG_CTL_VERBOSE:
 		IMSG_SIZE_CHECK(imsg, &verbose);
 		memcpy(&verbose, imsg->data, sizeof(verbose));
@@ -757,31 +763,32 @@ sockets_shutdown(void)
 {
 	struct socket		*sock = NULL, *tsock;
 	struct client		*client, *tclient;
-	/* struct subscription	*sub, *tsub; */
-
 
 	/* clean up sockets */
 	TAILQ_FOREACH_SAFE(sock, thingsd_env->sockets, entry, tsock) {
 		/* clean up clients */
 		TAILQ_FOREACH_SAFE(client, sock->clients, entry, tclient) {
-			if (client->bev != NULL)
-				bufferevent_disable(client->bev,
-				    EV_READ | EV_WRITE);
-			if (client->bev != NULL)
-				bufferevent_free(client->bev);
-
+			if (client->tls) {
+				if (event_initialized(&client->ev))
+					event_del(&client->ev);
+				tls_free(client->tls_ctx);
+			} else {
+				if (client->bev != NULL)
+					bufferevent_disable(client->bev,
+					    EV_READ | EV_WRITE);
+				if (client->bev != NULL)
+					bufferevent_free(client->bev);
+			}
 			close(client->fd);
 			TAILQ_REMOVE(sock->clients, client, entry);
 			free(client);
 		}
 
 		if (sock->conf.tls) {
-			/* tls_config_free(sock->tls_config); */
-			/* tls_free(sock->tls_ctx); */
-			/* free(sock->conf.tls_cert); */
-			/* free(sock->conf.tls_cert_file); */
-			/* free(sock->conf.tls_key); */
-			/* free(sock->conf.tls_key_file); */
+			tls_config_free(sock->tls_config);
+			tls_free(sock->tls_ctx);
+			free(sock->conf.tls_cert);
+			free(sock->conf.tls_key);
 			free(sock->conf.tls_ca);
 			free(sock->conf.tls_ca_file);
 			free(sock->conf.tls_crl);
@@ -789,7 +796,8 @@ sockets_shutdown(void)
 			free(sock->conf.tls_ocsp_staple);
 			free(sock->conf.tls_ocsp_staple_file);
 		}
-		event_del(&sock->ev);
+		if (event_initialized(&sock->ev))
+			event_del(&sock->ev);
 		evtimer_del(&sock->pause);
 		close(sock->fd);
 		TAILQ_REMOVE(thingsd_env->sockets, sock, entry);
@@ -898,22 +906,20 @@ sockets_socket_conn(int fd, short event, void *arg)
 	memset(&client->timeout, 0, sizeof(struct event));
 	evtimer_set(&client->timeout, sockets_client_sub_timeout, client);
 
-	/* if (sock->conf.tls) { */
-	/* 	if (tls_accept_socket(sock->tls_ctx, &client->tls_ctx, */
-	/* 	    client_fd) == -1) { */
-	/* 		log_warnx("tls accept failed: %s", */
-	/* 		    tls_error(sock->tls_ctx)); */
-	/* 		goto err; */
-	/* 	} */
-	/* } */
+	if (sock->conf.tls) {
+		if (tls_accept_socket(sock->tls_ctx, &client->tls_ctx,
+		    client_fd) == -1) {
+			log_warnx("tls accept failed: %s",
+			    tls_error(sock->tls_ctx));
+			goto err;
+		}
+	}
 
 	client->packages = calloc(1, sizeof(*client->packages));
 	if (client->packages == NULL)
 		goto err2;
 
 	TAILQ_INIT(client->packages);
-
-	/* sock->client_cnt++; */
 
 	if (sock->conf.max_clients > 0)
 		if (sock->client_cnt > sock->conf.max_clients) {
@@ -939,14 +945,14 @@ sockets_socket_conn(int fd, short event, void *arg)
 	client->fd = client_fd;
 	client->join_time = time(NULL);
 
-	/* if (sock->conf.tls) { */
-	/* 	client->tls = 1; */
-	/* 	event_del(&client->ev); */
-	/* 	event_set(&client->ev, client->fd, EV_READ | EV_PERSIST, */
-	/* 	    socket_tls_handshake, env); */
-	/* 	event_add(&client->ev, NULL); */
-	/* 	return; */
-	/* } */
+	if (sock->conf.tls) {
+		client->tls = 1;
+		event_del(&client->ev);
+		event_set(&client->ev, client->fd, EV_READ | EV_PERSIST,
+		    socket_tls_handshake, client);
+		event_add(&client->ev, NULL);
+		goto done;
+	}
 
 	client->bev = bufferevent_new(client->fd, clientrd, clientwr,
 	    client_err, client);
@@ -964,7 +970,7 @@ sockets_socket_conn(int fd, short event, void *arg)
 	bufferevent_setwatermark(client->bev, EV_READ, 0, PKT_BUFF);
 	bufferevent_enable(client->bev, EV_READ|EV_WRITE);
 	TAILQ_INSERT_TAIL(sock->clients, client, entry);
-
+done:
 	log_debug("%s: client connected (%d)", __func__, client->fd);
 	return;
 err:
@@ -975,8 +981,8 @@ err2:
 	if (client_fd != -1)
 		close(client_fd);
 	if (client != NULL) {
-		/* if (sock->conf.tls) */
-		/* 	tls_free(client->tls_ctx); */
+		if (sock->conf.tls)
+			tls_free(client->tls_ctx);
 		free(client);
 	}
 }

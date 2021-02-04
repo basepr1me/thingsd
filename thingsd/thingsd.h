@@ -60,6 +60,8 @@
 
 #define PKT_BUFF		 2048
 
+#define MAX_IMSG_DATA_SIZE	(MAX_IMSGSIZE - IMSG_HEADER_SIZE)
+
 enum imsg_type {
 	IMSG_GET_INFO_THINGSD_REQUEST = IMSG_PROC_MAX,
 	IMSG_GET_INFO_THINGSD_DATA,
@@ -93,6 +95,7 @@ enum imsg_type {
 	IMSG_CFG_DONE,
 
 	IMSG_CFG_SOCKS,
+	IMSG_CFG_TLS,
 	IMSG_DIST_THING_PACKAGE,
 	IMSG_DIST_CLIENT_PACKAGE,
 };
@@ -220,6 +223,23 @@ struct socket_config {
 	char			 tls_ecdhe_curves[TLS_CONFIG_MAX];
 
 	uint32_t		 tls_protocols;
+};
+
+enum tls_config_type {
+	TLS_CFG_CA,
+	TLS_CFG_CERT,
+	TLS_CFG_CRL,
+	TLS_CFG_KEY,
+	TLS_CFG_OCSP_STAPLE,
+};
+
+struct tls_config {
+	uint32_t		 id;
+
+	enum tls_config_type	 tls_type;
+	size_t			 tls_len;
+	size_t			 tls_chunk_len;
+	size_t			 tls_chunk_offset;
 };
 
 struct socket {
@@ -419,6 +439,7 @@ int	 config_getreset(struct thingsd *, struct imsg *);
 int	 config_setsocks(struct thingsd *, struct socket *);
 int	 config_getsocks(struct thingsd *, struct imsg *);
 int	 config_getcfg(struct thingsd *, struct imsg *);
+int	 config_getsocks_tls(struct thingsd *, struct imsg *);
 
 /* parse.y */
 int	 parse_config(const char *, struct thingsd *);

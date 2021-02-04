@@ -43,20 +43,16 @@ tls_load_keypair(struct socket *sock)
 	if (sock->conf.tls == 0)
 		return (0);
 
-	sock->conf.tls_cert = tls_load_file(sock->conf.tls_cert_file,
-	    &sock->conf.tls_cert_len, NULL);
-	if (sock->conf.tls_cert == NULL)
+	if ((sock->conf.tls_cert = tls_load_file(sock->conf.tls_cert_file,
+	    &sock->conf.tls_cert_len, NULL)) == NULL)
 		return (-1);
-
 	log_debug("%s: using certificate %s", __func__,
 	    sock->conf.tls_cert_file);
 
 	/* XXX allow to specify password for encrypted key */
-	sock->conf.tls_key = tls_load_file(sock->conf.tls_key_file,
-	    &sock->conf.tls_key_len, NULL);
-	if (sock->conf.tls_key == NULL)
+	if ((sock->conf.tls_key = tls_load_file(sock->conf.tls_key_file,
+	    &sock->conf.tls_key_len, NULL)) == NULL)
 		return (-1);
-
 	log_debug("%s: using private key %s", __func__,
 	    sock->conf.tls_key_file);
 
@@ -70,11 +66,10 @@ tls_load_ca(struct socket *sock)
 	    sock->conf.tls_ca_file == NULL)
 		return (0);
 
-	sock->conf.tls_ca = tls_load_file(sock->conf.tls_ca_file,
-	    &sock->conf.tls_ca_len, NULL);
-	if (sock->conf.tls_ca == NULL)
+	if ((sock->conf.tls_ca = tls_load_file(
+	    sock->conf.tls_ca_file,
+	    &sock->conf.tls_ca_len, NULL)) == NULL)
 		return (-1);
-
 	log_debug("%s: using ca cert(s) from %s", __func__,
 	    sock->conf.tls_ca_file);
 
@@ -90,10 +85,9 @@ tls_load_ocsp(struct socket *sock)
 	if (sock->conf.tls_ocsp_staple_file == NULL)
 		return (0);
 
-	sock->conf.tls_ocsp_staple = tls_load_file(
+	if ((sock->conf.tls_ocsp_staple = tls_load_file(
 	    sock->conf.tls_ocsp_staple_file,
-	    &sock->conf.tls_ocsp_staple_len, NULL);
-	if (sock->conf.tls_ocsp_staple == NULL) {
+	    &sock->conf.tls_ocsp_staple_len, NULL)) == NULL) {
 		log_warnx("%s: Failed to load ocsp staple from %s", __func__,
 		    sock->conf.tls_ocsp_staple_file);
 		return (-1);
@@ -118,11 +112,10 @@ tls_load_crl(struct socket *sock)
 	    sock->conf.tls_crl_file == NULL)
 		return (0);
 
-	sock->conf.tls_crl = tls_load_file(sock->conf.tls_crl_file,
-	    &sock->conf.tls_crl_len, NULL);
-	if (sock->conf.tls_crl == NULL)
+	if ((sock->conf.tls_crl = tls_load_file(
+	    sock->conf.tls_crl_file,
+	    &sock->conf.tls_crl_len, NULL)) == NULL)
 		return (-1);
-
 	log_debug("%s: using crl(s) from %s", __func__,
 	    sock->conf.tls_crl_file);
 
@@ -142,50 +135,44 @@ socket_tls_init(struct socket *sock)
 		 */
 		return (-1);
 
-	log_debug("%s: initializing tls for %d", __func__, sock->conf.id);
+	log_debug("%s: initializing tls for listener %d", __func__,
+	    sock->conf.id);
 
 	if (tls_init() != 0) {
 		log_warnx("%s: failed to initialise tls", __func__);
 		return (-1);
 	}
-
-	sock->tls_config = tls_config_new();
-	if (sock->tls_config == NULL) {
+	if ((sock->tls_config = tls_config_new()) == NULL) {
 		log_warnx("%s: failed to get tls config", __func__);
 		return (-1);
 	}
-
-	sock->tls_ctx = tls_server();
-	if (sock->tls_ctx == NULL) {
+	if ((sock->tls_ctx = tls_server()) == NULL) {
 		log_warnx("%s: failed to get tls server", __func__);
 		return (-1);
 	}
 
 	if (tls_config_set_protocols(sock->tls_config,
 	    sock->conf.tls_protocols) != 0) {
-		log_warnx("%s: failed to set tls protocols: %s", __func__,
-		    tls_config_error(sock->tls_config));
+		log_warnx("%s: failed to set tls protocols: %s",
+		    __func__, tls_config_error(sock->tls_config));
 		return (-1);
 	}
-
 	if (tls_config_set_ciphers(sock->tls_config,
 	    sock->conf.tls_ciphers) != 0) {
-		log_warnx("%s: failed to set tls ciphers: %s", __func__,
-		    tls_config_error(sock->tls_config));
+		log_warnx("%s: failed to set tls ciphers: %s",
+		    __func__, tls_config_error(sock->tls_config));
 		return (-1);
 	}
-
 	if (tls_config_set_dheparams(sock->tls_config,
 	    sock->conf.tls_dhe_params) != 0) {
-		log_warnx("%s: failed to set tls dhe params: %s", __func__,
-		    tls_config_error(sock->tls_config));
+		log_warnx("%s: failed to set tls dhe params: %s",
+		    __func__, tls_config_error(sock->tls_config));
 		return (-1);
 	}
-
 	if (tls_config_set_ecdhecurves(sock->tls_config,
 	    sock->conf.tls_ecdhe_curves) != 0) {
-		log_warnx("%s: failed to set tls ecdhe curves: %s", __func__,
-		    tls_config_error(sock->tls_config));
+		log_warnx("%s: failed to set tls ecdhe curves: %s",
+		    __func__, tls_config_error(sock->tls_config));
 		return (-1);
 	}
 
@@ -194,32 +181,30 @@ socket_tls_init(struct socket *sock)
 	    sock->conf.tls_key, sock->conf.tls_key_len,
 	    sock->conf.tls_ocsp_staple,
 	    sock->conf.tls_ocsp_staple_len) != 0) {
-		log_warnx("%s: failed to set tls certificate/key: %s", __func__,
-		    tls_config_error(sock->tls_config));
+		log_warnx("%s: failed to set tls certificate/key: %s",
+		    __func__, tls_config_error(sock->tls_config));
 		return (-1);
 	}
 
 	if (sock->conf.tls_ca != NULL) {
-		if (tls_config_set_ca_mem(sock->tls_config, sock->conf.tls_ca,
-			sock->conf.tls_ca_len) != 0) {
+		if (tls_config_set_ca_mem(sock->tls_config,
+		    sock->conf.tls_ca, sock->conf.tls_ca_len) != 0) {
 			log_warnx("%s: failed to add ca cert(s)", __func__);
 			return (-1);
 		}
-
 		if (tls_config_set_crl_mem(sock->tls_config,
 		    sock->conf.tls_crl, sock->conf.tls_crl_len) != 0) {
 			log_warnx("%s: failed to add crl(s)", __func__);
 			return (-1);
 		}
-
 		if (sock->conf.tls_flags & TLSFLAG_OPTIONAL)
 			tls_config_verify_client_optional(sock->tls_config);
 		else
 			tls_config_verify_client(sock->tls_config);
 	}
 
-	/* log_debug("%s: adding keypair for server %s", __func__, */
-	/*     sock->conf.name); */
+	log_debug("%s: adding keypair for listener %s", __func__,
+	    sock->conf.name);
 
 	if (tls_config_add_keypair_ocsp_mem(sock->tls_config,
 	    sock->conf.tls_cert, sock->conf.tls_cert_len,
@@ -254,49 +239,40 @@ socket_tls_init(struct socket *sock)
 	sock->conf.tls_crl_len = 0;
 	sock->conf.tls_key_len = 0;
 
-	return 0;
+	return (0);
 }
 
 void
 socket_tls_handshake(int fd, short event, void *arg)
 {
-	/* struct thingsd		*thingsd = (struct thingsd *)arg; */
-	/* struct client		*client = NULL, *tclient; */
-	/* ssize_t			 ret = 0; */
+	struct client		*client = (struct client *)arg;
+	ssize_t			 ret = 0;
 
-	/* TAILQ_FOREACH(tclient, thingsd->clients, entry) { */
-	/* 	if (tclient->fd == fd) { */
-	/* 		client = tclient; */
-	/* 		break; */
-	/* 	} */
-	/* } */
+	if (client == NULL)
+		return;
 
-	/* if (client == NULL) */
-	/* 	return; */
+	ret = tls_handshake(client->tls_ctx);
 
-	/* ret = tls_handshake(client->tls_ctx); */
-
-	/* if (ret == 0) { */
-	/* 	event_del(client->ev); */
-	/* 	log_debug("%s: tls handshake success", __func__); */
-	/* 	/1* client_add(thingsd, client); *1/ */
-	/* } else if (ret == TLS_WANT_POLLIN) { */
-	/* 	event_del(client->ev); */
-	/* 	event_set(client->ev, client->fd, EV_READ|EV_PERSIST, */
-	/* 		    socket_tls_handshake, thingsd); */
-	/* 	if (event_add(client->ev, NULL)) */
-	/* 		log_debug("%s: event add client", __func__); */
-	/* } else if (ret == TLS_WANT_POLLOUT) { */
-	/* 	event_del(client->ev); */
-	/* 	event_set(client->ev, client->fd, EV_WRITE|EV_PERSIST, */
-	/* 		    socket_tls_handshake, thingsd); */
-	/* 	if (event_add(client->ev, NULL)) */
-	/* 		log_debug("%s: event add client", __func__); */
-	/* } else { */
-	/* 	event_del(client->ev); */
-	/* 	log_debug("%s: tls handshake failed - %s", __func__, */
-	/* 	    tls_error(client->tls_ctx)); */
-	/* } */
+	if (ret == 0) {
+		event_del(&client->ev);
+		log_debug("%s: tls handshake success", __func__);
+	} else if (ret == TLS_WANT_POLLIN) {
+		event_del(&client->ev);
+		event_set(&client->ev, client->fd, EV_READ|EV_PERSIST,
+			    socket_tls_handshake, client);
+		if (event_add(&client->ev, NULL))
+			log_debug("%s: event add client", __func__);
+	} else if (ret == TLS_WANT_POLLOUT) {
+		event_del(&client->ev);
+		event_set(&client->ev, client->fd, EV_WRITE|EV_PERSIST,
+			    socket_tls_handshake, client);
+		if (event_add(&client->ev, NULL))
+			log_debug("%s: event add client", __func__);
+	} else {
+		event_del(&client->ev);
+		log_debug("%s: tls handshake failed - %s", __func__,
+		    tls_error(client->tls_ctx));
+	}
 }
 
 void

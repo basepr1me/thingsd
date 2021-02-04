@@ -11,7 +11,7 @@ MANDIR?=	${PREFIX}/man/man
 
 LDADD =		-levent -ltls -lssl -lcrypto -lutil
 DPADD =		${LIBEVENT} ${LIBTLS} ${LIBSSL} ${LIBCRYPTO} ${LIBUTIL}
-#DEBUG=		-g -DDEBUG=0 -O0
+# DEBUG=		-g -O0 -DDEBUG=0
 CFLAGS +=	-Wall -I${.CURDIR}
 CFLAGS +=	-Wstrict-prototypes -Wmissing-prototypes
 CFLAGS +=	-Wmissing-declarations
