@@ -1375,14 +1375,6 @@ parse_config(const char *filename, struct thingsd *env)
 	/* setup our listening sockets */
 	sockets_parse_sockets(env);
 
-	/* struct socket *sock; */
-	/* TAILQ_FOREACH(sock, env->sockets, entry) { */
-	/* 	log_debug("Sock %d %s: child: %d parent: %d thing: %d", */
-	/* 	    sock->conf.id, sock->conf.iface, */
-	/* 	    sock->conf.child_id, sock->conf.parent_id, */
-	/* 	    sock->conf.thing_id); */
-	/* } */
-
 	return (0);
 }
 

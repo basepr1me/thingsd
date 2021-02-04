@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019, 2020 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019, 2020-2021 Tracey Emery <tracey@traceyemery.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -33,8 +33,8 @@
 extern volatile int client_inflight;
 extern enum privsep_procid privsep_process;
 
-void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t,
-	    void *);
+/* void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t, */
+/* 	    void *); */
 void	 client_write_to_things(struct packages *);
 
 void
@@ -331,49 +331,3 @@ client_err(struct bufferevent *bev, short error, void *arg)
 
 	client_del(client);
 }
-
-/* void */
-/* clients_show_info(struct privsep *ps, struct imsg *imsg) */
-/* { */
-/* 	char filter[THINGSD_MAXNAME]; */
-/* 	struct client	*client, nci; */
-
-/* 	switch (imsg->hdr.type) { */
-/* 	case IMSG_GET_INFO_CLIENTS_REQUEST: */
-
-/* 		memcpy(filter, imsg->data, sizeof(filter)); */
-
-/* 		TAILQ_FOREACH(client, thingsd_env->clients, entry) { */
-/* 			if (filter[0] == '\0' || memcmp(filter, */
-/* 			    client->name, sizeof(filter)) == 0) { */
-
-/* 				memcpy(&nci.name, client->name, */
-/* 				    sizeof(nci.name)); */
-
-/* 				nci.subscribed = client->subscribed; */
-/* 				nci.fd = client->fd; */
-/* 				nci.port = client->port; */
-/* 				nci.tls = client->tls; */
-/* 				nci.subs = client->subs; */
-
-/* 				if (proc_compose_imsg(ps, PROC_CONTROL, -1, */
-/* 				    IMSG_GET_INFO_CLIENTS_DATA, */
-/* 				    imsg->hdr.peerid, -1, &nci, */
-/* 				    sizeof(nci)) == -1) */
-/* 					return; */
-
-/* 			} */
-/* 		} */
-
-/* 		if (proc_compose_imsg(ps, PROC_CONTROL, -1, */
-/* 		    IMSG_GET_INFO_CLIENTS_END_DATA, imsg->hdr.peerid, */
-/* 			    -1, &nci, sizeof(nci)) == -1) */
-/* 				return; */
-
-/* 		break; */
-/* 	default: */
-/* 		log_debug("%s: error handling imsg", __func__); */
-/* 		break; */
-/* 	} */
-/* } */
-

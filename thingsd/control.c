@@ -40,6 +40,8 @@
 
 #define CONTROL_BACKLOG 5
 
+int	 sockets_proc, clients_proc;
+
 struct ctl_connlist ctl_conns;
 
 struct ctl_conn *control_connbyfd(int);
@@ -48,11 +50,13 @@ void	 control_close(struct privsep *, struct imsg *, int,
 	    struct control_sock *);
 void	 control_dispatch_imsg(int, short, void *);
 int	 control_dispatch_thingsd(int, struct privsep_proc *, struct imsg *);
+int	 control_dispatch_sockets(int, struct privsep_proc *, struct imsg *);
 void	 control_imsg_forward(struct imsg *);
 void	 control_run(struct privsep *, struct privsep_proc *, void *);
 
 static struct privsep_proc procs[] = {
 	{ "thingsd",	PROC_PARENT,	control_dispatch_thingsd },
+	{ "sockets",	PROC_SOCKS,	control_dispatch_sockets },
 };
 
 void
@@ -66,6 +70,73 @@ control_run(struct privsep *ps, struct privsep_proc *p, void *arg)
 {
 	if (pledge("stdio cpath unix recvfd", NULL) == -1)
 		fatal("pledge");
+}
+
+int
+control_dispatch_sockets(int fd, struct privsep_proc *p, struct imsg *imsg)
+{
+	struct ctl_conn		*c;
+	struct privsep		*ps = p->p_ps;
+	struct control_sock	 cs = ps->ps_csock;
+	int			 bad = 0;
+
+	switch (imsg->hdr.type) {
+	case IMSG_BAD_THING:
+		bad = 1;
+	case IMSG_GET_INFO_SOCKETS_END_DATA:
+	case IMSG_GET_INFO_CLIENTS_END_DATA:
+		if (imsg->hdr.type == IMSG_GET_INFO_SOCKETS_END_DATA)
+			sockets_proc++;
+		if (imsg->hdr.type == IMSG_GET_INFO_CLIENTS_END_DATA)
+			clients_proc++;
+
+		if (sockets_proc == thingsd_env->prefork_socks) {
+			sockets_proc = 0;
+			goto dispatch;
+		}
+
+		if (clients_proc == thingsd_env->prefork_socks) {
+			clients_proc = 0;
+			goto dispatch;
+		}
+		break;
+dispatch:
+		c = control_connbyfd(imsg->hdr.peerid);
+		if (c == NULL) {
+			log_warnx("%s: fd %d: not found",
+			    __func__, imsg->hdr.peerid);
+			return (-1);
+		}
+
+		if (bad) {
+			control_close(ps, imsg, imsg->hdr.peerid, &cs);
+			break;
+		}
+
+		imsg_compose_event(&c->iev, imsg->hdr.type,
+		    0, 0, -1, imsg->data, IMSG_DATA_SIZE(imsg));
+		break;
+	case IMSG_GET_INFO_SOCKETS_DATA:
+	case IMSG_GET_INFO_CLIENTS_DATA:
+		c = control_connbyfd(imsg->hdr.peerid);
+		if (c == NULL) {
+			log_warnx("%s: fd %d: not found",
+			    __func__, imsg->hdr.peerid);
+			return (-1);
+		}
+
+		if (bad) {
+			control_close(ps, imsg, imsg->hdr.peerid, &cs);
+			break;
+		}
+
+		imsg_compose_event(&c->iev, imsg->hdr.type,
+		    0, 0, -1, imsg->data, IMSG_DATA_SIZE(imsg));
+		break;
+	default:
+		return (-1);
+	}
+	return (0);
 }
 
 int
@@ -85,10 +156,6 @@ control_dispatch_thingsd(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_GET_INFO_THINGSD_END_DATA:
 	case IMSG_GET_INFO_THINGS_DATA:
 	case IMSG_GET_INFO_THINGS_END_DATA:
-	case IMSG_GET_INFO_CLIENTS_DATA:
-	case IMSG_GET_INFO_CLIENTS_END_DATA:
-	case IMSG_GET_INFO_SOCKETS_DATA:
-	case IMSG_GET_INFO_SOCKETS_END_DATA:
 		c = control_connbyfd(imsg->hdr.peerid);
 		if (c == NULL) {
 			log_warnx("%s: fd %d: not found",

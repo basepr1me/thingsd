@@ -177,6 +177,7 @@ TAILQ_HEAD(clientlist, client);
 struct socket_config {
 	struct addresslist	*al;
 	char			 iface[THINGSD_MAXTEXT];
+	char			 name[THINGSD_MAXTEXT];
 	char			 thing_name[THINGSD_MAXTEXT];
 	int			 id;
 	int			 child_id;
@@ -277,8 +278,6 @@ struct thing_config {
 	int			 stop_bits;
 	int			 type;
 
-	size_t			 client_cnt;
-
 	int			 tls;
 	uint8_t			 tls_flags;
 
@@ -314,8 +313,6 @@ struct thing {
 	struct thing_config	 conf;
 	int			 exists;
 
-	size_t			 client_cnt;
-
 	/* either DEV, TCP conn, or UDP rcv fd */
 	int			 fd;
 
@@ -336,15 +333,14 @@ struct dead_thing {
 };
 TAILQ_HEAD(deadthinglist, dead_thing);
 
-
-/* struct packet_client { */
-/* 	TAILQ_ENTRY(packet_client)	 entry; */
-/* 	struct privsep		 ps; */
-/* 	struct imsg		 imsg; */
-/* 	int			 fd; */
-/* 	char			 name[THINGSD_MAXNAME]; */
-/* }; */
-/* TAILQ_HEAD(packetclientlist, packet_client); */
+struct packet_client {
+	TAILQ_ENTRY(packet_client)	 entry;
+	struct privsep		 ps;
+	struct imsg		 imsg;
+	int			 fd;
+	char			 name[THINGSD_MAXNAME];
+};
+TAILQ_HEAD(packetclientlist, packet_client);
 
 struct thingsd {
 	struct thinglist	*things;
@@ -379,7 +375,7 @@ struct thingsd {
 	int			 socks_reload;
 
 	/* control packets */
-	/* struct packetclientlist	*packet_clients; */
+	struct packetclientlist	*packet_clients;
 	int			 packet_client_count;
 };
 
@@ -393,7 +389,6 @@ void	 client_wr(struct bufferevent *, void *);
 void	 client_err(struct bufferevent *, short, void *);
 void	 client_tls_readcb(int, short, void *);
 void	 client_tls_writecb(int, short, void *);
-/* void	 clients_show_info(struct privsep *, struct imsg *); */
 
 /* sockets.c */
 struct socket
@@ -407,7 +402,6 @@ int	 sockets_open_client(char *, struct portrange *);
 int	 sockets_privinit(struct socket *);
 int	 sockets_client_cmp(struct client *, struct client *);
 void	 sockets_parse_sockets(struct thingsd *);
-void	 sockets_show_info(struct privsep *, struct imsg *);
 void	 sockets_socket_rlimit(int);
 void	 sockets_sighdlr(int, short, void *);
 void	 sockets_shutdown(void);
@@ -416,20 +410,6 @@ void	 sockets(struct privsep *, struct privsep_proc *);
 /* thingsd.c */
 struct thing	*thingsd_conf_new_thing(struct thingsd *, struct thing *,
 		    char *, int);
-/* things.c */
-/* void	 thing_rd(struct bufferevent *, void *); */
-/* void	 thing_wr(struct bufferevent *, void *); */
-/* void	 thing_err(struct bufferevent *, short, void *); */
-/* void	 things(struct privsep *, struct privsep_proc *); */
-/* void	 things_reset(void); */
-/* void	 things_shutdown(void); */
-/* int	 thing_privinit(struct thing *); */
-/* int	 thing_sock_privinit(struct socket *); */
-
-/* void	 things_show_info(struct privsep *, struct imsg *); */
-/* void	 things_echo_pkt(struct privsep *, struct imsg *); */
-/* void	 things_stop_pkt(struct privsep *, struct imsg *); */
-/* void	 send_to_packet_client(struct thingsd *, char *, char *, int); */
 
 /* config.c */
 int	 config_init(struct thingsd *);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2019, 2020-2021 Tracey Emery <tracey@traceyemery.net>
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -68,7 +68,7 @@ main(int argc, char *argv[])
 	int			 ctl_sock;
 	int			 done = 0;
 	int			 n, verbose = 0;
-	int			 ch, v = 0;
+	int			 ch;
 	char			*sockname;
 
 	sockname = THINGSD_SOCKET;
@@ -172,23 +172,14 @@ main(int argc, char *argv[])
 		}
 		printf("\n");
 		break;
-	case SHOW_PARENT:
-		imsg_compose(ibuf, IMSG_GET_INFO_PARENT_REQUEST, 0,
+	case SHOW_THINGSD:
+		imsg_compose(ibuf, IMSG_GET_INFO_THINGSD_REQUEST, 0,
 		    0, -1, NULL, 0);
 		break;
 	case RELOAD:
-		printf("\nAll things and sockets will be reset.\n");
-		printf("This can have unintended consequences!\n");
-		printf("For example, all clients will have to reconnect.\n\n");
-		printf("Are you sure you want to reload the config? (y|n) ");
-		ch = getchar();
-		if (ch == 'y' || ch == 'Y') {
-			imsg_compose(ibuf, IMSG_CTL_RESET, 0, 0, -1, &v,
-			    sizeof(v));
-			printf("Reload request sent\n");
-		} else
-			printf("Reload request ignored\n");
-		printf("\n");
+		printf("\nReload is not supported.\n");
+		printf("Use `rcctl restart thingsd` instead.\n");
+		printf("Naturally, this will disconnect all clients.\n");
 		done = 1;
 		break;
 	default:
@@ -237,7 +228,7 @@ main(int argc, char *argv[])
 				}
 				printf("%s\n", imsg.data);
 				break;
-			case SHOW_PARENT:
+			case SHOW_THINGSD:
 				done = show_parent_msg(&imsg);
 				break;
 			default:
@@ -256,10 +247,10 @@ main(int argc, char *argv[])
 int
 show_parent_msg(struct imsg *imsg)
 {
-	struct thingsd_parent_info *npi;
+	struct thingsd_thingsd_info *npi;
 
 	switch (imsg->hdr.type) {
-	case IMSG_GET_INFO_PARENT_DATA:
+	case IMSG_GET_INFO_THINGSD_DATA:
 		npi = imsg->data;
 		printf("\nParent says: Logging level is ");
 		if (npi->verbose == 2)
@@ -270,7 +261,7 @@ show_parent_msg(struct imsg *imsg)
 			printf("brief");
 		printf(" (%d).\n", npi->verbose);
 		break;
-	case IMSG_GET_INFO_PARENT_END_DATA:
+	case IMSG_GET_INFO_THINGSD_END_DATA:
 		return (1);
 	default:
 		break;
@@ -314,47 +305,38 @@ list_things_msg(struct imsg *imsg)
 	case IMSG_GET_INFO_THINGS_DATA:
 		nti = (struct thing *) imsg->data;
 
-		printf("\nThing Name:\t\t\t%s\n", nti->name);
-		switch(nti->type) {
-		case TCP:
-			printf("\tIP Addr:\t\t%s\n", nti->ipaddr);
-			printf("\tConnect Port:\t\t%d\n", nti->conn_port);
-			printf("\tPersists:\t\t%d\n", nti->persist);
+		printf("\nThing Name:\t\t\t%s\n", nti->conf.name);
+		switch(nti->conf.type) {
+		case S_TCP:
+			printf("\tIP Addr:\t\t%s\n", nti->conf.ipaddr);
+			printf("\tConnect Port:\t\t%d\n",
+			    ntohs(nti->conf.tcp_conn_port.val[0]));
+			printf("\tPersists:\t\t%d\n", nti->conf.persist);
 			break;
-		case UDP:
-			printf("\tUDP Listener:\t\t%s\n", nti->udp);
-			printf("\tConnect Port:\t\t%d\n", nti->rcv_port);
+		case S_UDP:
+			printf("\tUDP Listener:\t\t%s\n", nti->conf.udp);
+			printf("\tConnect Port:\t\t%d\n",
+			    ntohs(nti->conf.udp_rcv_port.val[0]));
 			break;
-		case DEV:
-			printf("\tDevice:\t\t\t%s\n", nti->location);
-			printf("\tBaud:\t\t\t%d\n", nti->baud);
-			printf("\tData:\t\t\t%d\n", nti->data_bits);
-			printf("\tStop:\t\t\t%d\n", nti->stop_bits);
-			printf("\tHardware:\t\t%d\n", nti->hw_ctl);
-			printf("\tSoftware:\t\t%d\n", nti->sw_ctl);
-			printf("\tParity:\t\t\t%s\n", nti->parity);
+		case S_DEV:
+			printf("\tDevice:\t\t\t%s\n", nti->conf.location);
+			printf("\tBaud:\t\t\t%d\n", nti->conf.baud);
+			printf("\tData:\t\t\t%d\n", nti->conf.data_bits);
+			printf("\tStop:\t\t\t%d\n", nti->conf.stop_bits);
+			printf("\tHardware:\t\t%d\n", nti->conf.hw_ctl);
+			printf("\tSoftware:\t\t%d\n", nti->conf.sw_ctl);
+			printf("\tParity:\t\t\t%s\n", nti->conf.parity);
 			break;
 	}
-		if (strncmp(nti->iface, "", PKT_BUFF) == 0)
+		if (strncmp(nti->conf.tcp_iface, "", PKT_BUFF) == 0)
 			printf("\tBind Interface:\t\tall\n");
 		else
-			printf("\tBind Interface:\t\t%s\n", nti->iface);
-		printf("\tListen Port:\t\t%d\n", nti->port);
-		if (nti->max_clients == 0)
-			printf("\tMax Clients:\t\tunlimited\n");
-		else
-			printf("\tMax Clients:\t\t%d\n", nti->max_clients);
-		printf("\tPassword:\t\t%s\n", nti->password);
-		printf("\tClient Count:\t\t%zu\n", nti->client_cnt);
-		if (nti->tls == false)
-			break;
-		printf("\tTLS:\t\t\t%d\n", nti->tls);
-		printf("\tCert:\t\t\t%s\n", nti->tls_cert_file);
-		printf("\tKey:\t\t\t%s\n", nti->tls_key_file);
-		printf("\tCA:\t\t\t%s\n", nti->tls_ca_file);
-		printf("\tCRL:\t\t\t%s\n", nti->tls_crl_file);
-		printf("\tOCSP:\t\t\t%s\n", nti->tls_ocsp_staple_file);
-
+			printf("\tBind Interface:\t\t%s\n",
+			    nti->conf.tcp_iface);
+		printf("\tListen Port:\t\t%d\n",
+		    ntohs(nti->conf.tcp_listen_port.val[0]));
+		printf("\tPassword:\t\t%s\n", nti->conf.password);
+		printf("\tTLS:\t\t\t%s\n", nti->conf.tls ? "Yes" : "No");
 		break;
 	case IMSG_GET_INFO_THINGS_END_DATA:
 		return (1);
@@ -379,10 +361,9 @@ list_clients_msg(struct imsg *imsg)
 
 		printf("\nClient Name:\t\t\t%s\n", nci->name);
 		printf("\tfd:\t\t\t%d\n", nci->fd);
-		printf("\tPort:\t\t\t%d\n", nci->port);
-		if (nci->tls == true)
-			printf("\tTLS:\t\t\tyes\n");
-		printf("\tSubscriptions:\t\t%zu\n", nci->subs);
+		printf("\tPort:\t\t\t%d\n", ntohs(nci->port.val[0]));
+		printf("\tSubscribed:\t\t%s\n", nci->subscribed ? "Yes" : "No");
+		printf("\tTLS:\t\t\t%s\n", nci->tls ? "Yes" : "No");
 		break;
 	case IMSG_GET_INFO_CLIENTS_END_DATA:
 		return (1);
@@ -403,19 +384,16 @@ list_sockets_msg(struct imsg *imsg)
 		nsi = (struct socket *) imsg->data;
 
 		printf("\n");
-		if (strcmp(nsi->name, "") == 0)
-			printf("Socket Name:\t\t\tReceive socket\n");
-		else
-			printf("Socket Name:\t\t\t%s\n", nsi->name);
+		printf("Socket Name:\t\t\t%s\n", nsi->conf.name);
 		printf("\tfd:\t\t\t%d\n", nsi->fd);
-		printf("\tPort:\t\t\t%d\n", nsi->port);
-		if (nsi->tls == true)
-			printf("\tTLS:\t\t\tyes\n\n");
+		printf("\tPort:\t\t\t%d\n", ntohs(nsi->conf.port.val[0]));
 		printf("\tClient Count:\t\t%zu\n", nsi->client_cnt);
-		if (nsi->max_clients == 0)
+		if (nsi->conf.max_clients == 0)
 			printf("\tMax Clients:\t\tunlimited\n");
 		else
-			printf("\tMax Clients:\t\t%zu\n", nsi->max_clients);
+			printf("\tMax Clients:\t\t%zu\n",
+			    nsi->conf.max_clients);
+		printf("\tTLS:\t\t\t%s\n", nsi->conf.tls ? "Yes" : "No");
 		break;
 	case IMSG_GET_INFO_SOCKETS_END_DATA:
 		return (1);

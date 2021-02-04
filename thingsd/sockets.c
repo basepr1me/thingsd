@@ -50,6 +50,7 @@ int	 sockets_dispatch_thingsd(int, struct privsep_proc *, struct imsg *);
 int	 sockets_socket_af(struct sockaddr_storage *, struct portrange);
 int	 sockets_accept_reserve(int, struct sockaddr *, socklen_t *, int,
 	    volatile int *);
+int	 sockets_dispatch_control(int, struct privsep_proc *, struct imsg *);
 
 void	 sockets_dup_new_socket(struct socket *, struct socket *);
 void	 sockets_run(struct privsep *, struct privsep_proc *, void *);
@@ -58,6 +59,9 @@ void	 sockets_launch(void);
 void	 sockets_client_sub_timeout(int, short, void *);
 void	 sockets_client_accept_paused(int, short, void *);
 void	 sockets_write_to_clients(struct package *);
+void	 sockets_show_info(struct privsep *, struct imsg *);
+void	 sockets_show_clients_info(struct privsep *, struct imsg *);
+void	 sockets_kill_client(struct privsep *, struct imsg *);
 
 struct socket
 	*sockets_conf_new_socket(struct thingsd *, struct thing *, int, int);
@@ -66,6 +70,7 @@ struct socket
 extern enum privsep_procid privsep_process;
 
 static struct privsep_proc procs[] = {
+	{ "control",	PROC_CONTROL,	sockets_dispatch_control, control },
 	{ "thingsd",	PROC_PARENT,	sockets_dispatch_thingsd  },
 };
 
@@ -136,6 +141,30 @@ sockets_privinit(struct socket *sock)
 	return (0);
 }
 
+int
+sockets_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
+{
+	struct privsep	*ps = p->p_ps;
+	int		 res = 0, cmd = 0;
+
+	switch (imsg->hdr.type) {
+	default:
+		return (-1);
+	}
+
+	switch (cmd) {
+	case 0:
+		break;
+	default:
+		if (proc_compose_imsg(ps, PROC_CONTROL, -1, cmd,
+		    imsg->hdr.peerid, -1, &res, sizeof(res)) == -1)
+			return (-1);
+		break;
+	}
+
+	return (0);
+}
+
 void
 sockets_parse_sockets(struct thingsd *env)
 {
@@ -199,6 +228,9 @@ sockets_dup_new_socket(struct socket *p_sock, struct socket *sock)
 
 	memcpy(&sock->conf.thing_name, p_sock->conf.thing_name,
 	    sizeof(sock->conf.thing_name));
+
+	snprintf(sock->conf.name, THINGSD_MAXTEXT, "%s_child",
+	    p_sock->conf.thing_name);
 
 	TAILQ_FOREACH(a, p_sock->conf.al, entry) {
 		if (a->ss.ss_family == AF_INET)
@@ -278,6 +310,9 @@ sockets_conf_new_socket(struct thingsd *env, struct thing *thing, int id,
 
 	if (is_dup)
 		goto done;
+
+	snprintf(sock->conf.name, THINGSD_MAXTEXT, "%s_parent",
+	    thing->conf.name);
 
 	if (strlcpy(sock->conf.thing_name, thing->conf.name,
 	    sizeof(sock->conf.thing_name)) >= sizeof(sock->conf.thing_name)) {
@@ -530,48 +565,79 @@ sockets_write_to_clients(struct package *package)
 }
 
 void
+sockets_show_clients_info(struct privsep *ps, struct imsg *imsg)
+{
+	char filter[THINGSD_MAXNAME];
+	struct client	*client, nci;
+	struct socket	*sock;
+
+	memcpy(filter, imsg->data, sizeof(filter));
+
+	TAILQ_FOREACH(sock, thingsd_env->sockets, entry) {
+		if (sock->client_cnt == 0)
+			continue;
+		TAILQ_FOREACH(client, sock->clients, entry) {
+			if (filter[0] == '\0' || strcmp(filter,
+			    client->name) == 0) {
+
+				memcpy(&nci.name, client->name,
+				    sizeof(nci.name));
+
+				nci.subscribed = client->subscribed;
+				nci.fd = client->fd;
+				nci.port = client->port;
+				nci.tls = client->tls;
+
+				if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+				    IMSG_GET_INFO_CLIENTS_DATA,
+				    imsg->hdr.peerid, -1, &nci,
+				    sizeof(nci)) == -1)
+					return;
+
+			}
+		}
+	}
+
+	if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+	    IMSG_GET_INFO_CLIENTS_END_DATA, imsg->hdr.peerid,
+		    -1, &nci, sizeof(nci)) == -1)
+			return;
+}
+
+void
 sockets_show_info(struct privsep *ps, struct imsg *imsg)
 {
-	/* char filter[THINGSD_MAXNAME]; */
-	/* struct socket	*socket, nsi; */
+	char filter[THINGSD_MAXNAME];
+	struct socket	*socket, nsi;
 
-	/* switch (imsg->hdr.type) { */
-	/* case IMSG_GET_INFO_SOCKETS_REQUEST: */
+	memcpy(filter, imsg->data, sizeof(filter));
 
-	/* 	memcpy(filter, imsg->data, sizeof(filter)); */
+	TAILQ_FOREACH(socket, thingsd_env->sockets, entry) {
+		if (filter[0] == '\0' || strcmp(filter,
+		    socket->conf.name) == 0) {
 
-	/* 	TAILQ_FOREACH(socket, thingsd_env->sockets, entry) { */
-	/* 		if (filter[0] == '\0' || memcmp(filter, */
-	/* 		    socket->name, sizeof(filter)) == 0) { */
+			memcpy(&nsi.conf.name, socket->conf.name,
+			    sizeof(nsi.conf.name));
 
-	/* 			memcpy(&nsi.name, socket->name, */
-	/* 			    sizeof(nsi.name)); */
+			nsi.fd = socket->fd;
+			nsi.conf.port = socket->conf.port;
+			nsi.conf.tls = socket->conf.tls;
+			nsi.client_cnt = socket->client_cnt;
+			nsi.conf.max_clients = socket->conf.max_clients;
 
-	/* 			nsi.fd = socket->fd; */
-	/* 			nsi.port = socket->port; */
-	/* 			nsi.tls = socket->tls; */
-	/* 			nsi.client_cnt = socket->client_cnt; */
-	/* 			nsi.max_clients = socket->max_clients; */
+			if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+			    IMSG_GET_INFO_SOCKETS_DATA,
+			    imsg->hdr.peerid, -1, &nsi,
+			    sizeof(nsi)) == -1)
+				return;
 
-	/* 			if (proc_compose_imsg(ps, PROC_CONTROL, -1, */
-	/* 			    IMSG_GET_INFO_SOCKETS_DATA, */
-	/* 			    imsg->hdr.peerid, -1, &nsi, */
-	/* 			    sizeof(nsi)) == -1) */
-	/* 				return; */
+		}
+	}
 
-	/* 		} */
-	/* 	} */
-
-	/* 	if (proc_compose_imsg(ps, PROC_CONTROL, -1, */
-	/* 	    IMSG_GET_INFO_SOCKETS_END_DATA, imsg->hdr.peerid, */
-	/* 		    -1, &nsi, sizeof(nsi)) == -1) */
-	/* 			return; */
-
-	/* 	break; */
-	/* default: */
-	/* 	log_debug("%s: error handling imsg", __func__); */
-	/* 	break; */
-	/* } */
+	if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+	    IMSG_GET_INFO_SOCKETS_END_DATA, imsg->hdr.peerid,
+		    -1, &nsi, sizeof(nsi)) == -1)
+			return;
 }
 
 void
@@ -596,6 +662,27 @@ sockets_socket_rlimit(int maxfd)
 		fatal("%s: failed to set resource limit", __func__);
 }
 
+void
+sockets_kill_client(struct privsep *ps, struct imsg *imsg)
+{
+	struct socket		*sock;
+	struct client		*client;
+	char			 client_name[THINGSD_MAXTEXT];
+
+	memcpy(client_name, imsg->data, sizeof(client_name));
+
+	TAILQ_FOREACH(sock, thingsd_env->sockets, entry) {
+		TAILQ_FOREACH(client, sock->clients, entry) {
+			if (strcmp(client->name, client_name) == 0) {
+				log_debug("Control killed client: %s",
+				    client_name);
+				client_del(client);
+				break;
+			}
+		}
+	}
+}
+
 int
 sockets_dispatch_thingsd(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
@@ -605,6 +692,9 @@ sockets_dispatch_thingsd(int fd, struct privsep_proc *p, struct imsg *imsg)
 	unsigned int		 mode;
 
 	switch (imsg->hdr.type) {
+	case IMSG_KILL_CLIENT:
+		sockets_kill_client(ps, imsg);
+		break;
 	case IMSG_DIST_THING_PACKAGE:
 		IMSG_SIZE_CHECK(imsg, package);
 		package = (struct package *)imsg->data;
@@ -630,17 +720,18 @@ sockets_dispatch_thingsd(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_CTL_START:
 		sockets_launch();
 		break;
+	case IMSG_GET_INFO_CLIENTS_REQUEST:
+		sockets_show_clients_info(ps, imsg);
+		break;
+	case IMSG_GET_INFO_SOCKETS_REQUEST:
+		sockets_show_info(ps, imsg);
+		break;
 	default:
 		return (-1);
 	}
 
 	switch (cmd) {
 	case 0:
-		break;
-	case IMSG_GET_INFO_THINGS_END_DATA:
-		if (proc_compose_imsg(ps, PROC_PARENT, -1, cmd,
-		    imsg->hdr.peerid, -1, &mode, sizeof(mode)) == -1)
-			return (-1);
 		break;
 	default:
 		if (proc_compose_imsg(ps, PROC_PARENT, -1, cmd,

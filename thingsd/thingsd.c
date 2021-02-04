@@ -57,10 +57,10 @@ void	 thingsd_sighdlr(int sig, short event, void *arg);
 void	 thingsd_shutdown(struct thingsd *);
 void	 thingsd_parent_shutdown(struct thingsd *);
 void	 thingsd_configure_done(struct thingsd *);
-void	 thingsd_reload(int);
 void	 thingsd_thing_serial_open(struct thing *, int);
 void	 thingsd_thing_setup(struct thingsd *, struct thing *, int);
 void	 thingsd_show_info(struct privsep *, struct imsg *);
+void	 thingsd_show_thing_info(struct privsep *, struct imsg *);
 void	 thingsd_thing_udp_event(int, short, void *);
 void	 thingsd_thing_read(struct bufferevent *, void *);
 void	 thingsd_thing_write(struct bufferevent *, void *);
@@ -69,13 +69,19 @@ void	 thingsd_add_reconn(struct thing *);
 void	 thingsd_do_reconn(struct thingsd *);
 void	 thingsd_write_to_socks(struct packages *);
 void	 thingsd_write_to_things(struct package *);
+void	 thingsd_echo_pkt(struct privsep *, struct imsg *);
+void	 thingsd_stop_pkt(struct privsep *, struct imsg *);
 
-struct	 dead_thing *thingsd_new_dead_thing(struct thing *);
+struct thing
+	 thingsd_compose_thing(struct thing *, enum imsg_type);
+struct	 dead_thing 
+	*thingsd_new_dead_thing(struct thing *);
 
 extern enum privsep_procid privsep_process;
 
 struct thingsd	*thingsd_env;
 int		 thing_id;
+
 
 static struct privsep_proc procs[] = {
 	{ "control",	PROC_CONTROL,	thingsd_dispatch_control, control },
@@ -101,7 +107,7 @@ thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 		IMSG_SIZE_CHECK(imsg, &v);
 		if (imsg->data == NULL)
 			break;
-		/* things_stop_pkt(ps, imsg); */
+		thingsd_stop_pkt(ps, imsg);
 		break;
 	case IMSG_SHOW_PACKETS_REQUEST:
 		IMSG_SIZE_CHECK(imsg, &v);
@@ -110,7 +116,7 @@ thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 		memcpy(thing_name, imsg->data, sizeof(thing_name));
 		TAILQ_FOREACH(thing, thingsd_env->things, entry) {
 			if (strcmp(thing->conf.name, thing_name) == 0) {
-				/* things_echo_pkt(ps, imsg); */
+				thingsd_echo_pkt(ps, imsg);
 				exists = 1;
 				break;
 			}
@@ -125,40 +131,26 @@ thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 		IMSG_SIZE_CHECK(imsg, &v);
 		if (imsg->data == NULL)
 			break;
-		/* memcpy(client_name, imsg->data, sizeof(client_name)); */
-		/* TAILQ_FOREACH(client, thingsd_env->clients, entry) { */
-		/* 	if (strcmp(client->name, client_name) == 0) { */
-		/* 		log_debug("Control killed client: %s", */
-		/* 		    client_name); */
-		/* 		client_del(thingsd_env, client); */
-		/* 		break; */
-		/* 	} */
-		/* } */
+		proc_forward_imsg(ps, imsg, PROC_SOCKS, -1);
 		break;
 	case IMSG_GET_INFO_CLIENTS_REQUEST:
-		/* clients_show_info(ps, imsg); */
+		proc_forward_imsg(ps, imsg, PROC_SOCKS, -1);
 		break;
 	case IMSG_GET_INFO_SOCKETS_REQUEST:
-		/* sockets_show_info(ps, imsg); */
+		proc_forward_imsg(ps, imsg, PROC_SOCKS, -1);
 		break;
 	case IMSG_GET_INFO_THINGS_REQUEST:
 	case IMSG_GET_INFO_THINGS_REQUEST_ROOT:
-		/* things_show_info(ps, imsg); */
+		thingsd_show_thing_info(ps, imsg);
 		break;
 	case IMSG_GET_INFO_THINGSD_REQUEST:
-		/* thingsd_show_info(ps, imsg); */
-		break;
-	case IMSG_CTL_RESET:
-		IMSG_SIZE_CHECK(imsg, &v);
-		memcpy(&v, imsg->data, sizeof(v));
-		thingsd_reload(v);
+		thingsd_show_info(ps, imsg);
 		break;
 	case IMSG_CTL_VERBOSE:
 		IMSG_SIZE_CHECK(imsg, &verbose);
 		memcpy(&verbose, imsg->data, sizeof(verbose));
 		log_setverbose(verbose);
-
-		/* proc_forward_imsg(ps, imsg, PROC_SOCKS, -1); */
+		proc_forward_imsg(ps, imsg, PROC_SOCKS, -1);
 		break;
 	default:
 		return (-1);
@@ -210,13 +202,7 @@ thingsd_sighdlr(int sig, short event, void *arg)
 
 	switch (sig) {
 	case SIGHUP:
-		log_info("%s: reload requested with SIGHUP", __func__);
-
-		/*
-		 * This is safe because libevent uses async signal handlers
-		 * that run in the event loop and not in signal context.
-		 */
-		thingsd_reload(0);
+		log_info("%s: ignoring SIGHUP", __func__);
 		break;
 	case SIGPIPE:
 		log_info("%s: ignoring SIGPIPE", __func__);
@@ -274,6 +260,7 @@ main(int argc, char **argv)
 			env->thingsd_verbose++;
 			break;
 		case 'n':
+			env->thingsd_debug = 2;
 			env->thingsd_noaction = 1;
 			break;
 		case 'P':
@@ -461,27 +448,6 @@ thingsd_configure_done(struct thingsd *env)
 }
 
 void
-thingsd_reload(int reset)
-{
-	const char *filename = thingsd_env->thingsd_conffile;
-
-	log_debug("%s: reload config file %s", __func__, filename);
-
-	/* things_reset(); */
-
-	/* Purge the existing configuration. */
-	config_purge(thingsd_env, reset);
-	config_setreset(thingsd_env, reset);
-
-	/* if (parse_config(thingsd_env->thingsd_conffile) == -1) { */
-	/* 	log_warnx("%s: failed to reload config file %s", */
-	/* 	    __func__, filename); */
-	/* } */
-
-	/* thingsd_configure_things(thingsd_env->thingsd_ps); */
-}
-
-void
 thingsd_shutdown(struct thingsd *env)
 {
 	proc_kill(env->thingsd_ps);
@@ -523,8 +489,15 @@ thingsd_parent_shutdown(struct thingsd *env)
 	struct socket		*sock, *tsock;
 	struct package		*package, *tpkg;
 	struct dead_thing	*dead_thing, *tdead_thing;
+	struct packet_client	*pclt, *tpclt;
 
 	log_debug("thingsd parent shutting down");
+
+	/* clean up packet clients */
+	TAILQ_FOREACH_SAFE(pclt, env->packet_clients, entry, tpclt) {
+		TAILQ_REMOVE(env->packet_clients, pclt, entry);
+		free(pclt);
+	}
 
 	/* clean up dead things */
 	TAILQ_FOREACH_SAFE(dead_thing, env->dead_things, entry, tdead_thing) {
@@ -896,7 +869,9 @@ thingsd_write_to_things(struct package *package)
 			}
 		}
 		break;
+	case S_UDP:
 	default:
+		log_info("write %d bytes: %s", package->len, package->pkt);
 		write(thing->fd, package->pkt, package->len);
 		break;
 	}
@@ -907,6 +882,8 @@ thingsd_write_to_socks(struct packages *packages)
 {
 	struct privsep		*ps = thingsd_env->thingsd_ps;
 	struct package		*package, *tpkg, p;
+	struct packet_client	*packet_client;
+	struct thing		*thing = NULL;
 	unsigned int		 id, what;
 	int			 fd = -1, n, m;
 	struct iovec		 iov[6];
@@ -949,6 +926,30 @@ thingsd_write_to_socks(struct packages *packages)
 				}
 			}
 		}
+
+		TAILQ_FOREACH(thing, thingsd_env->things, entry) {
+			if (thing->conf.id == package->thing_id)
+				break;
+		}
+
+		if (thing == NULL)
+			goto free;
+
+		TAILQ_FOREACH(packet_client, thingsd_env->packet_clients,
+		    entry) {
+			if (strlen(packet_client->name) != 0) {
+				if (strcmp(thing->conf.name,
+				    packet_client->name) == 0)
+					if (proc_compose_imsg(
+					    &packet_client->ps,
+					    PROC_CONTROL, -1,
+					    IMSG_SHOW_PACKETS_DATA,
+					    packet_client->imsg.hdr.peerid, -1,
+					    package->pkt, package->len) == -1)
+					break;
+			}
+		}
+free:
 		TAILQ_REMOVE(packages, package, entry);
 		free(package);
 	}
@@ -1107,3 +1108,124 @@ thingsd_do_reconn(struct thingsd *env)
 	if (env->dcount == 0)
 		env->exists = 0;
 }
+
+void
+thingsd_echo_pkt(struct privsep *ps, struct imsg *imsg)
+{
+	struct packet_client	*packet_client;
+
+	packet_client = calloc(1, sizeof(*packet_client));
+	if (packet_client == NULL)
+		fatal("%s: calloc", __func__);
+
+	thingsd_env->packet_client_count++;
+
+	packet_client->ps = *ps;
+	packet_client->imsg = *imsg;
+
+	memcpy(packet_client->name, imsg->data,  sizeof(packet_client->name));
+
+	log_debug("control packet echo request for %s", packet_client->name);
+
+	TAILQ_INSERT_TAIL(thingsd_env->packet_clients, packet_client, entry);
+}
+
+void
+thingsd_stop_pkt(struct privsep *ps, struct imsg *imsg)
+{
+	struct packet_client	*packet_client, *tpacket_client;
+	uint32_t		 fd;
+
+	memcpy(&fd, imsg->data, sizeof(fd));
+
+	TAILQ_FOREACH_SAFE(packet_client, thingsd_env->packet_clients, entry,
+	    tpacket_client) {
+		if (fd == packet_client->imsg.hdr.peerid) {
+			TAILQ_REMOVE(thingsd_env->packet_clients,
+			    packet_client, entry);
+			log_debug("control packet echo request stopping for %s",
+			    packet_client->name);
+			thingsd_env->packet_client_count--;
+			free(packet_client);
+			return;
+		}
+	}
+
+}
+
+void
+thingsd_show_thing_info(struct privsep *ps, struct imsg *imsg)
+{
+	char filter[THINGSD_MAXNAME];
+	struct thing *thing, nti;
+
+	memcpy(filter, imsg->data, sizeof(filter));
+
+	TAILQ_FOREACH(thing, thingsd_env->things, entry) {
+		if (filter[0] == '\0' || strcmp(filter,
+		    thing->conf.name) == 0) {
+			nti = thingsd_compose_thing(thing,
+			    imsg->hdr.type);
+
+			if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+			    IMSG_GET_INFO_THINGS_DATA,
+			    imsg->hdr.peerid, -1, &nti,
+			    sizeof(nti)) == -1)
+				return;
+		}
+	}
+
+	if (proc_compose_imsg(ps, PROC_CONTROL, -1,
+	    IMSG_GET_INFO_THINGS_END_DATA, imsg->hdr.peerid,
+		    -1, &nti, sizeof(nti)) == -1)
+			return;
+}
+
+struct thing
+thingsd_compose_thing(struct thing *thing, enum imsg_type type)
+{
+	struct thing		 nti;
+	char			 blank[9] = "********";
+
+	memset(&nti, 0, sizeof(nti));
+	nti.exists = thing->exists;
+	nti.conf.hw_ctl = thing->conf.hw_ctl;
+	nti.conf.persist = thing->conf.persist;
+
+	memcpy(&nti.conf.tcp_iface, thing->conf.tcp_iface,
+	    sizeof(nti.conf.tcp_iface));
+
+	memcpy(&nti.conf.ipaddr, thing->conf.ipaddr, sizeof(nti.conf.ipaddr));
+
+	memcpy(&nti.conf.parity, thing->conf.parity, sizeof(nti.conf.parity));
+
+	memcpy(&nti.conf.name, thing->conf.name, sizeof(nti.conf.name));
+
+	nti.conf.password[0] = '\0';
+	if (type == IMSG_GET_INFO_THINGS_REQUEST)
+		memcpy(&nti.conf.password, blank, sizeof(nti.conf.password));
+	else
+		memcpy(&nti.conf.password, thing->conf.password,
+		    sizeof(nti.conf.password));
+
+	memcpy(&nti.conf.location, thing->conf.location,
+	    sizeof(nti.conf.location));
+
+	memcpy(&nti.conf.udp, thing->conf.udp, sizeof(nti.conf.udp));
+	memcpy(&nti.conf.udp_iface, thing->conf.udp_iface,
+	    sizeof(nti.conf.udp_iface));
+
+	nti.fd = thing->fd;
+	nti.conf.baud = thing->conf.baud;
+	nti.conf.tcp_conn_port = thing->conf.tcp_conn_port;
+	nti.conf.udp_rcv_port = thing->conf.udp_rcv_port;
+	nti.conf.data_bits = thing->conf.data_bits;
+	nti.conf.max_clients = thing->conf.max_clients;
+	nti.conf.tcp_listen_port = thing->conf.tcp_listen_port;
+	nti.conf.stop_bits = thing->conf.stop_bits;
+	nti.conf.type = thing->conf.type;
+	nti.conf.tls = thing->conf.tls;
+
+	return nti;
+}
+

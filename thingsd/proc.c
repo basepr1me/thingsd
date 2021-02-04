@@ -1,5 +1,3 @@
-/*	$OpenBSD: proc.c,v 1.39 2020/08/03 10:57:21 benno Exp $	*/
-
 /*
  * Copyright (c) 2010 - 2016 Reyk Floeter <reyk@openbsd.org>
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -685,7 +683,11 @@ proc_dispatch(int fd, short event, void *arg)
 			    pf.pf_instance);
 			break;
 		default:
-			fatalx("%s: %s %d got invalid imsg %d peerid %d "
+			/*
+			 * change from fatalx
+			 * just because it's bad doesn't mean we should crash
+			 */
+			log_warnx("%s: %s %d got invalid imsg %d peerid %d "
 			    "from %s %d",
 			    __func__, title, ps->ps_instance + 1,
 			    imsg.hdr.type, imsg.hdr.peerid,

@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2019, 2020-2021 Tracey Emery <tracey@traceyemery.net>
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
  *
@@ -87,7 +88,7 @@ static const struct token t_list[] = {
 static const struct token t_show[] = {
 	{KEYWORD,	"client",	NONE,		t_client_name},
 	{KEYWORD,	"control",	SHOW_CONTROL,	NULL},
-	{KEYWORD,	"parent",	SHOW_PARENT,	NULL},
+	{KEYWORD,	"parent",	SHOW_THINGSD,	NULL},
 	{KEYWORD,	"socket",	NONE,		t_socket_name},
 	{KEYWORD,	"thing",	NONE,		t_thing_name},
 	{ENDTOKEN,	"",		NONE,		NULL}
