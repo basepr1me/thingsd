@@ -33,8 +33,8 @@
 extern volatile int client_inflight;
 extern enum privsep_procid privsep_process;
 
-/* void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t, */
-/* 	    void *); */
+void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t,
+	    void *);
 void	 client_write_to_things(struct packages *);
 
 void
@@ -50,8 +50,8 @@ client_del(struct client *client)
 	}
 	log_debug("%s: disconnecting client %s (%d)", __func__, client->name,
 	    client->fd);
-	/* if (client->tls) */
-	/* 	tls_free(client->tls_ctx); */
+	if (client->tls)
+		tls_free(client->tls_ctx);
 
 	if (evtimer_initialized(&client->timeout))
 		evtimer_del(&client->timeout);
@@ -148,71 +148,6 @@ client_rd(struct bufferevent *bev, void *arg)
 }
 
 void
-client_tls_readcb(int fd, short event, void *arg)
-{
-	/* struct bufferevent	*bufev = (struct bufferevent *)arg; */
-	/* struct thingsd		*env = bufev->cbarg; */
-	/* struct client		*client = NULL, *tclient; */
-	/* char			 pkt[PKT_BUFF]; */
-	/* ssize_t			 ret; */
-	/* size_t			 len; */
-	/* int			 toread = EVBUFFER_READ; */
-
-	/* TAILQ_FOREACH(tclient, env->clients, entry) { */
-	/* 	if (tclient->fd == fd) */
-	/* 		client = tclient; */
-	/* } */
-
-	/* if (client == NULL) */
-	/* 	return; */
-
-	/* memset(pkt, 0, sizeof(pkt)); */
-
-	/* ret = tls_read(client->tls_ctx, pkt, PKT_BUFF); */
-	/* if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) { */
-	/* 	goto retry; */
-	/* } else if (ret < 0) { */
-	/* 	toread |= EVBUFFER_ERROR; */
-	/* 	goto err; */
-	/* } */
-
-	/* len = ret; */
-	/* if (len == 0) { */
-	/* 	toread |= EVBUFFER_EOF; */
-	/* 	goto err; */
-	/* } */
-
-	/* if (evbuffer_add(bufev->input, pkt, len) == -1) { */
-	/* 	toread |= EVBUFFER_ERROR; */
-	/* 	goto err; */
-	/* } */
-
-	/* event_add(&bufev->ev_read, NULL); */
-
-	/* len = EVBUFFER_LENGTH(bufev->input); */
-	/* if (bufev->wm_read.low != 0 && len < bufev->wm_read.low) */
-	/* 	return; */
-
-	/* if (bufev->wm_read.high != 0 && len > bufev->wm_read.high) { */
-	/* 	struct evbuffer *buf = bufev->input; */
-	/* 	event_del(&bufev->ev_read); */
-	/* 	evbuffer_setcb(buf, bufferevent_read_pressure_cb, bufev); */
-	/* 	return; */
-	/* } */
-
-	/* if (bufev->readcb != NULL) */
-	/* 	(*bufev->readcb)(bufev, bufev->cbarg); */
-
-	/* return; */
-/* retry: */
-	/* event_del(&bufev->ev_read); */
-	/* event_add(&bufev->ev_read, NULL); */
-	/* return; */
-/* err: */
-	/* (*bufev->errorcb)(bufev, toread, bufev->cbarg); */
-}
-
-void
 client_write_to_things(struct packages *packages)
 {
 	struct privsep		*ps = thingsd_env->thingsd_ps;
@@ -270,55 +205,105 @@ client_wr(struct bufferevent *bev, void *arg)
 }
 
 void
+client_tls_readcb(int fd, short event, void *arg)
+{
+	struct client		*client = (struct client *)arg;
+	struct bufferevent	*bufev = client->bev;
+	char			 pkt[PKT_BUFF];
+	ssize_t			 ret;
+	size_t			 len;
+	int			 toread = EVBUFFER_READ;
+
+	memset(pkt, 0, sizeof(pkt));
+
+	ret = tls_read(client->tls_ctx, pkt, PKT_BUFF);
+	if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) {
+		goto retry;
+	} else if (ret < 0) {
+		toread |= EVBUFFER_ERROR;
+		goto err;
+	}
+
+	len = ret;
+	if (len == 0) {
+		toread |= EVBUFFER_EOF;
+		goto err;
+	}
+
+	if (evbuffer_add(bufev->input, pkt, len) == -1) {
+		toread |= EVBUFFER_ERROR;
+		goto err;
+	}
+
+	event_add(&bufev->ev_read, NULL);
+
+	len = EVBUFFER_LENGTH(bufev->input);
+	if (bufev->wm_read.low != 0 && len < bufev->wm_read.low)
+		return;
+
+	if (bufev->wm_read.high != 0 && len > bufev->wm_read.high) {
+		struct evbuffer *buf = bufev->input;
+		event_del(&bufev->ev_read);
+		evbuffer_setcb(buf, bufferevent_read_pressure_cb, bufev);
+		return;
+	}
+
+	if (bufev->readcb != NULL)
+		(*bufev->readcb)(bufev, bufev->cbarg);
+
+	return;
+retry:
+	event_del(&bufev->ev_read);
+	event_add(&bufev->ev_read, NULL);
+	return;
+err:
+	(*bufev->errorcb)(bufev, toread, bufev->cbarg);
+}
+
+void
 client_tls_writecb(int fd, short event, void *arg)
 {
-	/* struct bufferevent	*bufev = (struct bufferevent *)arg; */
-	/* struct thingsd		*env = bufev->cbarg; */
-	/* struct client		*client = NULL, *tclient; */
-	/* ssize_t			 ret; */
-	/* size_t			 len; */
-	/* int			 towrite = EVBUFFER_WRITE; */
+	struct client		*client = (struct client *)arg;
+	struct bufferevent	*bufev = client->bev;
+	ssize_t			 ret;
+	size_t			 len;
+	int			 towrite = EVBUFFER_WRITE;
 
-	/* TAILQ_FOREACH(tclient, env->clients, entry) { */
-	/* 	if (tclient->fd == fd) */
-	/* 		client = tclient; */
-	/* } */
+	if (EVBUFFER_LENGTH(bufev->output)) {
+		if (client == NULL)
+			return;
 
-	/* if (EVBUFFER_LENGTH(bufev->output)) { */
-	/* 	if (client == NULL) */
-	/* 		return; */
+		ret = tls_write(client->tls_ctx,
+		    EVBUFFER_DATA(bufev->output),
+		    EVBUFFER_LENGTH(bufev->output));
 
-	/* 	ret = tls_write(client->tls_ctx, */
-	/* 	    EVBUFFER_DATA(bufev->output), */
-	/* 	    EVBUFFER_LENGTH(bufev->output)); */
+		if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) {
+			goto retry;
+		} else if (ret < 0) {
+			towrite |= EVBUFFER_ERROR;
+			goto err;
+		}
 
-	/* 	if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) { */
-	/* 		goto retry; */
-	/* 	} else if (ret < 0) { */
-	/* 		towrite |= EVBUFFER_ERROR; */
-	/* 		goto err; */
-	/* 	} */
+		len = ret;
+		evbuffer_drain(bufev->output, len);
+	}
 
-	/* 	len = ret; */
-	/* 	evbuffer_drain(bufev->output, len); */
-	/* } */
+	if (EVBUFFER_LENGTH(bufev->output) != 0) {
+		event_del(&bufev->ev_write);
+		event_add(&bufev->ev_write, NULL);
+	}
 
-	/* if (EVBUFFER_LENGTH(bufev->output) != 0) { */
-	/* 	event_del(&bufev->ev_write); */
-	/* 	event_add(&bufev->ev_write, NULL); */
-	/* } */
+	if (bufev->writecb != NULL && EVBUFFER_LENGTH(bufev->output) <=
+	    bufev->wm_write.low)
+		(*bufev->writecb)(bufev, bufev->cbarg);
 
-	/* if (bufev->writecb != NULL && EVBUFFER_LENGTH(bufev->output) <= */
-	/*     bufev->wm_write.low) */
-	/* 	(*bufev->writecb)(bufev, bufev->cbarg); */
-
-	/* return; */
-/* retry: */
-	/* event_del(&bufev->ev_write); */
-	/* event_add(&bufev->ev_write, NULL); */
-	/* return; */
-/* err: */
-	/* (*bufev->errorcb)(bufev, towrite, bufev->cbarg); */
+	return;
+retry:
+	event_del(&bufev->ev_write);
+	event_add(&bufev->ev_write, NULL);
+	return;
+err:
+	(*bufev->errorcb)(bufev, towrite, bufev->cbarg);
 }
 
 void

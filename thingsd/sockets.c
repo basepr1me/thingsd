@@ -962,9 +962,9 @@ sockets_socket_conn(int fd, short event, void *arg)
 
 	if (client->tls) {
 		event_set(&client->bev->ev_read, client->fd, EV_READ,
-		    client_tls_readcb, client->bev);
+		    client_tls_readcb, client);
 		event_set(&client->bev->ev_write, client->fd, EV_WRITE,
-		    client_tls_writecb, client->bev);
+		    client_tls_writecb, client);
 	}
 
 	bufferevent_setwatermark(client->bev, EV_READ, 0, PKT_BUFF);
