@@ -414,6 +414,7 @@ thingsd_configure(struct thingsd *env)
 
 
 	TAILQ_FOREACH(sock, env->sockets, entry) {
+		socket_tls_load(sock);
 		if (config_setsocks(env, sock) == -1)
 			fatalx("%s: send socket error", __func__);
 	}

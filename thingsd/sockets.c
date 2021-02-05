@@ -47,6 +47,9 @@
 
 volatile int client_inflight = 0;
 
+void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t,
+	    void *);
+
 int	 sockets_dispatch_thingsd(int, struct privsep_proc *, struct imsg *);
 int	 sockets_socket_af(struct sockaddr_storage *, struct portrange);
 int	 sockets_accept_reserve(int, struct sockaddr *, socklen_t *, int,
@@ -63,6 +66,8 @@ void	 sockets_write_to_clients(struct package *);
 void	 sockets_show_info(struct privsep *, struct imsg *);
 void	 sockets_show_clients_info(struct privsep *, struct imsg *);
 void	 sockets_kill_client(struct privsep *, struct imsg *);
+void	 sockets_tls_readcb(int, short, void *);
+void	 sockets_tls_writecb(int, short, void *);
 
 struct socket
 	*sockets_conf_new_socket(struct thingsd *, struct thing *, int, int);
@@ -223,7 +228,7 @@ sockets_dup_new_socket(struct socket *p_sock, struct socket *sock)
 	sock->conf.port.op = p_sock->conf.port.op;
 
 	sock->conf.tls = p_sock->conf.tls;
-	sock->conf.tls_protocols = p_sock->conf.tls_flags;
+	sock->conf.tls_protocols = p_sock->conf.tls_protocols;
 	sock->conf.tls_flags = p_sock->conf.tls_flags;
 	sock->conf.max_clients = p_sock->conf.max_clients;
 
@@ -278,8 +283,6 @@ sockets_dup_new_socket(struct socket *p_sock, struct socket *sock)
 	    sizeof(sock->conf.tls_ecdhe_curves)) >=
 	    sizeof(sock->conf.tls_ecdhe_curves))
 		fatalx("%s: strlcpy", __func__);
-
-	socket_tls_load(sock);
 }
 
 struct socket *
@@ -352,7 +355,7 @@ sockets_conf_new_socket(struct thingsd *env, struct thing *thing, int id,
 	sock->conf.port.op = thing->conf.tcp_listen_port.op;
 
 	sock->conf.tls = thing->conf.tls;
-	sock->conf.tls_protocols = thing->conf.tls_flags;
+	sock->conf.tls_protocols = thing->conf.tls_protocols;
 	sock->conf.tls_flags = thing->conf.tls_flags;
 
 	if(sock->conf.tls == 0)
@@ -379,7 +382,6 @@ sockets_conf_new_socket(struct thingsd *env, struct thing *thing, int id,
 	    sizeof(sock->conf.tls_ecdhe_curves)) >=
 	    sizeof(sock->conf.tls_ecdhe_curves))
 		fatalx("%s: strlcpy", __func__);
-	socket_tls_load(sock);
 done:
 	return (sock);
 }
@@ -962,9 +964,9 @@ sockets_socket_conn(int fd, short event, void *arg)
 
 	if (client->tls) {
 		event_set(&client->bev->ev_read, client->fd, EV_READ,
-		    client_tls_readcb, client);
+		    sockets_tls_readcb, client->bev);
 		event_set(&client->bev->ev_write, client->fd, EV_WRITE,
-		    client_tls_writecb, client);
+		    sockets_tls_writecb, client->bev);
 	}
 
 	bufferevent_setwatermark(client->bev, EV_READ, 0, PKT_BUFF);
@@ -986,3 +988,106 @@ err2:
 		free(client);
 	}
 }
+
+void
+sockets_tls_readcb(int fd, short event, void *arg)
+{
+	struct bufferevent	*bufev = (struct bufferevent *)arg;
+	struct client		*client = bufev->cbarg;
+	char			 pkt[PKT_BUFF];
+	ssize_t			 ret;
+	size_t			 len;
+	int			 toread = EVBUFFER_READ;
+
+	memset(pkt, 0, sizeof(pkt));
+
+	ret = tls_read(client->tls_ctx, pkt, PKT_BUFF);
+	if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) {
+		goto retry;
+	} else if (ret < 0) {
+		toread |= EVBUFFER_ERROR;
+		goto err;
+	}
+
+	len = ret;
+	if (len == 0) {
+		toread |= EVBUFFER_EOF;
+		goto err;
+	}
+
+	if (evbuffer_add(bufev->input, pkt, len) == -1) {
+		toread |= EVBUFFER_ERROR;
+		goto err;
+	}
+
+	event_add(&bufev->ev_read, NULL);
+
+	len = EVBUFFER_LENGTH(bufev->input);
+	if (bufev->wm_read.low != 0 && len < bufev->wm_read.low)
+		return;
+
+	if (bufev->wm_read.high != 0 && len > bufev->wm_read.high) {
+		struct evbuffer *buf = bufev->input;
+		event_del(&bufev->ev_read);
+		evbuffer_setcb(buf, bufferevent_read_pressure_cb, bufev);
+		return;
+	}
+
+	if (bufev->readcb != NULL)
+		(*bufev->readcb)(bufev, bufev->cbarg);
+
+	return;
+retry:
+	event_del(&bufev->ev_read);
+	event_add(&bufev->ev_read, NULL);
+	return;
+err:
+	(*bufev->errorcb)(bufev, toread, bufev->cbarg);
+}
+
+void
+sockets_tls_writecb(int fd, short event, void *arg)
+{
+	struct bufferevent	*bufev = (struct bufferevent *)arg;
+	struct client		*client = bufev->cbarg;
+	ssize_t			 ret;
+	size_t			 len;
+	int			 towrite = EVBUFFER_WRITE;
+
+	if (EVBUFFER_LENGTH(bufev->output)) {
+		if (client == NULL)
+			return;
+
+		ret = tls_write(client->tls_ctx,
+		    EVBUFFER_DATA(bufev->output),
+		    EVBUFFER_LENGTH(bufev->output));
+
+		if (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT) {
+			goto retry;
+		} else if (ret < 0) {
+			towrite |= EVBUFFER_ERROR;
+			goto err;
+		}
+
+		len = ret;
+		evbuffer_drain(bufev->output, len);
+	}
+
+	if (EVBUFFER_LENGTH(bufev->output) != 0) {
+		event_del(&bufev->ev_write);
+		event_add(&bufev->ev_write, NULL);
+	}
+
+	if (bufev->writecb != NULL && EVBUFFER_LENGTH(bufev->output) <=
+	    bufev->wm_write.low)
+		(*bufev->writecb)(bufev, bufev->cbarg);
+
+	return;
+retry:
+	event_del(&bufev->ev_write);
+	event_add(&bufev->ev_write, NULL);
+	return;
+err:
+	(*bufev->errorcb)(bufev, towrite, bufev->cbarg);
+}
+

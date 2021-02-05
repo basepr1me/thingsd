@@ -54,7 +54,7 @@ int main(int argc, char *argv[])
 	int sd, i, w, written;
 	struct tls_config *tls_cfg = NULL;
 	struct tls *tls_ctx = NULL;
-	char pkt[] = "~~~subscribe{{name,\"thgtstr\"},{things{thing{\"thing2\",\"Mother\"}}}}";
+	char pkt[] = "~~~subscribe{{name,\"thgtstr2\"},{things{thing{\"thing4\",\"pass_thing\"}}}}";
 	if (argc != 4)
 		usage();
 

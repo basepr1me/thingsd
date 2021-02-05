@@ -246,10 +246,14 @@ void
 socket_tls_handshake(int fd, short event, void *arg)
 {
 	struct client		*client = (struct client *)arg;
+	struct socket		*sock = client->sock;
 	ssize_t			 ret = 0;
 
 	if (client == NULL)
 		return;
+
+	if (sock->tls_ctx == NULL || client->tls_ctx == NULL)
+		fatalx("NULL tls context");
 
 	ret = tls_handshake(client->tls_ctx);
 

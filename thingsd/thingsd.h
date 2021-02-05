@@ -407,8 +407,6 @@ void	 client_del(struct client *);
 void	 client_rd(struct bufferevent *, void *);
 void	 client_wr(struct bufferevent *, void *);
 void	 client_err(struct bufferevent *, short, void *);
-void	 client_tls_readcb(int, short, void *);
-void	 client_tls_writecb(int, short, void *);
 
 /* sockets.c */
 struct socket
