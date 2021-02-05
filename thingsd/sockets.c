@@ -953,7 +953,6 @@ sockets_socket_conn(int fd, short event, void *arg)
 		event_set(&client->ev, client->fd, EV_READ | EV_PERSIST,
 		    socket_tls_handshake, client);
 		event_add(&client->ev, NULL);
-		goto done;
 	}
 
 	client->bev = bufferevent_new(client->fd, clientrd, clientwr,
@@ -972,7 +971,7 @@ sockets_socket_conn(int fd, short event, void *arg)
 	bufferevent_setwatermark(client->bev, EV_READ, 0, PKT_BUFF);
 	bufferevent_enable(client->bev, EV_READ|EV_WRITE);
 	TAILQ_INSERT_TAIL(sock->clients, client, entry);
-done:
+
 	log_debug("%s: client connected (%d)", __func__, client->fd);
 	return;
 err:
