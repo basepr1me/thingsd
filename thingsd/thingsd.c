@@ -786,7 +786,7 @@ thingsd_thing_setup(struct thingsd *env, struct thing *thing, int reconn)
 	if (thing->conf.type == S_TCP) {
 		if (thing->conf.persist == 1) {
 			if ((thing->fd = sockets_open_client(thing->conf.ipaddr,
-			    &thing->conf.tcp_conn_port)) == -1) {
+			    thing->conf.tcp_conn_port)) == -1) {
 				log_warnx("%s: ipaddr connection failed",
 				    __func__);
 				if (reconn)
@@ -855,7 +855,7 @@ thingsd_write_to_things(struct package *package)
 	case S_DEV:
 		if (thing->conf.persist == 0) {
 			if ((thing->fd = sockets_open_client(thing->conf.ipaddr,
-			    &thing->conf.tcp_conn_port)) == -1) {
+			    thing->conf.tcp_conn_port)) == -1) {
 				log_warnx("%s: temporary ipaddr connection"
 				    " failed", __func__);
 				return;
@@ -872,7 +872,6 @@ thingsd_write_to_things(struct package *package)
 		break;
 	case S_UDP:
 	default:
-		log_info("write %d bytes: %s", package->len, package->pkt);
 		write(thing->fd, package->pkt, package->len);
 		break;
 	}

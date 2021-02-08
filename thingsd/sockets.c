@@ -51,7 +51,7 @@ void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t,
 	    void *);
 
 int	 sockets_dispatch_thingsd(int, struct privsep_proc *, struct imsg *);
-int	 sockets_socket_af(struct sockaddr_storage *, struct portrange);
+int	 sockets_socket_af(struct sockaddr_storage *, in_port_t);
 int	 sockets_accept_reserve(int, struct sockaddr *, socklen_t *, int,
 	    volatile int *);
 int	 sockets_dispatch_control(int, struct privsep_proc *, struct imsg *);
@@ -224,8 +224,7 @@ sockets_dup_new_socket(struct socket *p_sock, struct socket *sock)
 	    sizeof(sock->conf.password)) >= sizeof(sock->conf.password))
 		fatalx("%s: strlcpy", __func__);
 
-	sock->conf.port.val[0] = p_sock->conf.port.val[0];
-	sock->conf.port.op = p_sock->conf.port.op;
+	sock->conf.port = p_sock->conf.port;
 
 	sock->conf.tls = p_sock->conf.tls;
 	sock->conf.tls_protocols = p_sock->conf.tls_protocols;
@@ -247,7 +246,7 @@ sockets_dup_new_socket(struct socket *p_sock, struct socket *sock)
 		memcpy(&acp->ss, &a->ss, sizeof(acp->ss));
 		acp->ipproto = a->ipproto;
 		acp->prefixlen = a->prefixlen;
-		acp->port.val[0] = a->port.val[0];
+		acp->port = a->port;
 		if (strlen(a->ifname) != 0) {
 			if (strlcpy(acp->ifname, a->ifname,
 			    sizeof(acp->ifname)) >= sizeof(acp->ifname)) {
@@ -333,7 +332,7 @@ sockets_conf_new_socket(struct thingsd *env, struct thing *thing, int id,
 		memcpy(&acp->ss, &a->ss, sizeof(acp->ss));
 		acp->ipproto = a->ipproto;
 		acp->prefixlen = a->prefixlen;
-		acp->port.val[0] = a->port.val[0];
+		acp->port = a->port;
 		if (strlen(a->ifname) != 0) {
 			if (strlcpy(acp->ifname, a->ifname,
 			    sizeof(acp->ifname)) >= sizeof(acp->ifname)) {
@@ -351,8 +350,7 @@ sockets_conf_new_socket(struct thingsd *env, struct thing *thing, int id,
 	    sizeof(sock->conf.password)) >= sizeof(sock->conf.password))
 		fatalx("%s: strlcpy", __func__);
 
-	sock->conf.port.val[0] = thing->conf.tcp_listen_port.val[0];
-	sock->conf.port.op = thing->conf.tcp_listen_port.op;
+	sock->conf.port = thing->conf.tcp_listen_port;
 
 	sock->conf.tls = thing->conf.tls;
 	sock->conf.tls_protocols = thing->conf.tls_protocols;
@@ -387,16 +385,16 @@ done:
 }
 
 int
-sockets_socket_af(struct sockaddr_storage *ss, struct portrange port)
+sockets_socket_af(struct sockaddr_storage *ss, in_port_t port)
 {
 	switch (ss->ss_family) {
 	case AF_INET:
-		((struct sockaddr_in *)ss)->sin_port = port.val[0];
+		((struct sockaddr_in *)ss)->sin_port = port;
 		((struct sockaddr_in *)ss)->sin_len =
 		    sizeof(struct sockaddr_in);
 		break;
 	case AF_INET6:
-		((struct sockaddr_in6 *)ss)->sin6_port = port.val[0];
+		((struct sockaddr_in6 *)ss)->sin6_port = port;
 		((struct sockaddr_in6 *)ss)->sin6_len =
 		    sizeof(struct sockaddr_in6);
 		break;
@@ -408,7 +406,7 @@ sockets_socket_af(struct sockaddr_storage *ss, struct portrange port)
 }
 
 int
-sockets_create_socket(struct addresslist *al, struct portrange port, int type)
+sockets_create_socket(struct addresslist *al, in_port_t port, int type)
 {
 	struct addrinfo		 hints;
 	struct address		*a;
@@ -454,7 +452,7 @@ sockets_create_socket(struct addresslist *al, struct portrange port, int type)
 		if (bind(fd, (struct sockaddr *)&a->ss, a->ss.ss_len) == -1) {
 			close(fd);
 			log_info("%s: can't bind to port %d", __func__,
-			    ntohs(port.val[0]));
+			    ntohs(port));
 			goto fail;
 		}
 		if (type == S_TCP) {
@@ -474,7 +472,7 @@ fail:
 }
 
 int
-sockets_open_client(char *ip_addr, struct portrange *port)
+sockets_open_client(char *ip_addr, in_port_t port)
 {
 	int			 fd = -1;
 
@@ -488,7 +486,7 @@ sockets_open_client(char *ip_addr, struct portrange *port)
 	}
 
 	TAILQ_FOREACH(a, &al, entry) {
-		if (sockets_socket_af(&a->ss, *port) == -1) {
+		if (sockets_socket_af(&a->ss, port) == -1) {
 			log_warnx("%s: sockets_socket_af", __func__);
 			return (-1);
 		}
@@ -902,8 +900,7 @@ sockets_socket_conn(int fd, short event, void *arg)
 	if (client == NULL)
 		goto err2;
 
-	client->port.val[0] = sock->conf.port.val[0];
-	client->port.op = sock->conf.port.op;
+	client->port = sock->conf.port;
 
 	memset(&client->timeout, 0, sizeof(struct event));
 	evtimer_set(&client->timeout, sockets_client_sub_timeout, client);

@@ -94,8 +94,7 @@ void	 clear_config(struct thingsd *xconf);
 
 static int		 errors;
 
-int		 get_addrs(const char *, struct addresslist *,
-		    struct portrange *);
+int		 get_addrs(const char *, struct addresslist *, in_port_t);
 
 static struct thingsd		*thingsd;
 static struct thing		*new_thing;
@@ -112,7 +111,7 @@ typedef struct {
 	union {
 		long long		 number;
 		char			*string;
-		struct portrange	 port;
+		in_port_t		 port;
 	} v;
 	int lineno;
 } YYSTYPE;
@@ -253,8 +252,7 @@ port		: NUMBER {
 				yyerror("invalid port: %lld", $1);
 				YYERROR;
 			}
-			$$.val[0] = htons($1);
-			$$.op = 1;
+			$$ = htons($1);
 		}
 		| STRING {
 			int	 val;
@@ -266,8 +264,7 @@ port		: NUMBER {
 			}
 			free($1);
 
-			$$.val[0] = val;
-			$$.op = 1;
+			$$ = val;
 		}
 		;
 
@@ -311,15 +308,13 @@ locationopts1	: bindopts2
 			struct thing	*thing;
 
 			TAILQ_FOREACH(thing, thingsd->things, entry) {
-				if (thing->conf.tcp_listen_port.val[0] ==
-				    $5.val[0]) {
+				if (thing->conf.tcp_listen_port == $5) {
 					yyerror("tls port already assigned");
 					YYERROR;
 				}
 			}
 
-			new_thing->conf.tcp_listen_port.val[0] = $5.val[0];
-			new_thing->conf.tcp_listen_port.op = $5.op;
+			new_thing->conf.tcp_listen_port = $5;
 		}
 		| maxclientssub
 		| PASSWORD STRING {
@@ -426,37 +421,31 @@ opttls		: /* empty */ {
 		;
 
 socketopts1	: CONNECT ON PORT port {
-			new_thing->conf.tcp_conn_port.val[0] = $4.val[0];
-			new_thing->conf.tcp_conn_port.op = $4.op;
+			new_thing->conf.tcp_conn_port = $4;
 		}
 		| LISTEN ON opttls PORT port {
 			struct thing	*thing;
 			TAILQ_FOREACH(thing, thingsd->things, entry) {
-				if (thing->conf.tcp_listen_port.val[0] ==
-				    $5.val[0]) {
+				if (thing->conf.tcp_listen_port == $5) {
 					yyerror("port already assigned");
 					YYERROR;
 				}
 			}
 
-			new_thing->conf.tcp_listen_port.val[0] = $5.val[0];
-			new_thing->conf.tcp_listen_port.op = $5.op;
+			new_thing->conf.tcp_listen_port = $5;
 		}
 		| RECEIVE ON PORT port {
 			struct thing *thing;
 			TAILQ_FOREACH(thing, thingsd_env->things, entry) {
-				if (thing->conf.udp_rcv_port.val[0] == 0 ||
-				    $4.val[0] == 0)
+				if (thing->conf.udp_rcv_port == 0 || $4 == 0)
 					continue;
-				if (thing->conf.udp_rcv_port.val[0] ==
-				    $4.val[0]) {
+				if (thing->conf.udp_rcv_port == $4) {
 					yyerror("UDP thing receive ports must "
 					   "be unique");
 					   YYERROR;
 				}
 			}
-			new_thing->conf.udp_rcv_port.val[0] = $4.val[0];
-			new_thing->conf.udp_rcv_port.op = $4.op;
+			new_thing->conf.udp_rcv_port = $4;
 
 			/* if((new_thing->conf.udp_rcv_port = */
 			/*     strdup($4)) == NULL) */
@@ -526,7 +515,7 @@ subthings	: THING '{' STRING optcomma STRING '}' {
 				goto done;
 
 			/* check that ports match */
-			if (sock->conf.port.val[0] != pclient->port.val[0])
+			if (sock->conf.port != pclient->port)
 				goto done;
 
 			/*
@@ -708,12 +697,12 @@ thing		: THING STRING {
 			free($2);
 
 		} '{' optnl thingopts2 '}' {
-			if (new_thing->conf.tcp_listen_port.val[0] == 0) {
+			if (new_thing->conf.tcp_listen_port == 0) {
 				yyerror("thing listen port required");
 				YYERROR;
 			}
 			if (strlen(new_thing->conf.ipaddr) != 0 &&
-			    new_thing->conf.tcp_conn_port.val[0] == 0) {
+			    new_thing->conf.tcp_conn_port == 0) {
 				yyerror("ipaddr connect port required");
 				YYERROR;
 			}
@@ -728,7 +717,7 @@ thing		: THING STRING {
 				YYERROR;
 			}
 			if (strlen(new_thing->conf.udp) != 0 &&
-			    new_thing->conf.udp_rcv_port.val[0] == 0) {
+			    new_thing->conf.udp_rcv_port == 0) {
 				yyerror("udp receive port required");
 				YYERROR;
 			}
@@ -740,14 +729,14 @@ thing		: THING STRING {
 
 			if (get_addrs(new_thing->conf.tcp_iface,
 			    new_thing->conf.tcp_al,
-			    &new_thing->conf.tcp_listen_port) == -1) {
+			    new_thing->conf.tcp_listen_port) == -1) {
 				yyerror("could not get tcp iface addrs");
 				YYERROR;
 			}
 
 			if (get_addrs(new_thing->conf.udp_iface,
 			    new_thing->conf.udp_al,
-			    &new_thing->conf.udp_rcv_port) == -1) {
+			    new_thing->conf.udp_rcv_port) == -1) {
 				yyerror("could not get udp iface addrs");
 				YYERROR;
 			}
@@ -1562,7 +1551,7 @@ host_v6(const char *s)
 
 int
 host_dns(const char *s, struct addresslist *al, int max,
-    struct portrange *port, const char *ifname, int ipproto)
+    in_port_t port, const char *ifname, int ipproto)
 {
 	struct addrinfo		 hints, *res0, *res;
 	int			 error, cnt = 0;
@@ -1593,8 +1582,8 @@ host_dns(const char *s, struct addresslist *al, int max,
 		if ((h = calloc(1, sizeof(*h))) == NULL)
 			fatal(__func__);
 
-		if (port != NULL)
-			memcpy(&h->port, port, sizeof(h->port));
+		if (port)
+			h->port = port;
 		if (ifname != NULL) {
 			if (strlcpy(h->ifname, ifname, sizeof(h->ifname)) >=
 			    sizeof(h->ifname)) {
@@ -1635,7 +1624,7 @@ host_dns(const char *s, struct addresslist *al, int max,
 
 int
 host_if(const char *s, struct addresslist *al, int max,
-    struct portrange *port, const char *ifname, int ipproto)
+    in_port_t port, const char *ifname, int ipproto)
 {
 	struct ifaddrs		*ifap, *p;
 	struct sockaddr_in	*sain;
@@ -1659,8 +1648,8 @@ host_if(const char *s, struct addresslist *al, int max,
 		if ((h = calloc(1, sizeof(*h))) == NULL)
 			fatal("calloc");
 
-		if (port != NULL)
-			memcpy(&h->port, port, sizeof(h->port));
+		if (port)
+			h->port = port;
 		if (ifname != NULL) {
 			if (strlcpy(h->ifname, ifname, sizeof(h->ifname)) >=
 			    sizeof(h->ifname)) {
@@ -1709,7 +1698,7 @@ host_if(const char *s, struct addresslist *al, int max,
 
 int
 host(const char *s, struct addresslist *al, int max,
-    struct portrange *port, const char *ifname, int ipproto)
+    in_port_t port, const char *ifname, int ipproto)
 {
 	struct address *h;
 
@@ -1720,8 +1709,8 @@ host(const char *s, struct addresslist *al, int max,
 		h = host_v6(s);
 
 	if (h != NULL) {
-		if (port != NULL)
-			memcpy(&h->port, port, sizeof(h->port));
+		if (port)
+			h->port = port;
 		if (ifname != NULL) {
 			if (strlcpy(h->ifname, ifname, sizeof(h->ifname)) >=
 			    sizeof(h->ifname)) {
@@ -1786,7 +1775,7 @@ end:
 }
 
 int
-get_addrs(const char *addr, struct addresslist *al, struct portrange *port)
+get_addrs(const char *addr, struct addresslist *al, in_port_t port)
 {
 	if (strcmp("", addr) == 0) {
 		if (host("0.0.0.0", al, 1, port, "0.0.0.0", -1) <= 0) {

@@ -126,17 +126,12 @@ struct subscription {
 };
 TAILQ_HEAD(subscriptionlist, subscription);
 
-struct portrange {
-	in_port_t		 val[2];
-	uint8_t			 op;
-};
-
 struct address {
 	TAILQ_ENTRY(address)	 entry;
 	struct sockaddr_storage	 ss;
 	int			 ipproto;
 	int			 prefixlen;
-	struct portrange	 port;
+	in_port_t		 port;
 	char			 ifname[IFNAMSIZ];
 };
 TAILQ_HEAD(addresslist, address);
@@ -168,7 +163,7 @@ struct client {
 	char			 name[THINGSD_MAXNAME];
 
 	int			 fd;
-	struct portrange	 port;
+	in_port_t		 port;
 	time_t			 join_time;
 	size_t			 subs;
 
@@ -191,7 +186,7 @@ struct socket_config {
 	int			 ipv4;
 	int			 ipv6;
 
-	struct portrange	 port;
+	in_port_t		 port;
 	size_t			 max_clients;
 	char			 password[THINGSD_MAXTEXT];
 
@@ -288,9 +283,9 @@ struct thing_config {
 	char			 udp[THINGSD_MAXTEXT];
 	char			 udp_iface[THINGSD_MAXTEXT];
 
-	struct portrange	 tcp_listen_port;
-	struct portrange	 tcp_conn_port;
-	struct portrange	 udp_rcv_port;
+	in_port_t		 tcp_listen_port;
+	in_port_t		 tcp_conn_port;
+	in_port_t		 udp_rcv_port;
 
 	int			 baud;
 	int			 data_bits;
@@ -415,8 +410,8 @@ struct socket
 	*sockets_get_socket(struct thingsd *, int);
 struct socket
 	*sockets_get_socket_byid(struct thingsd *, int);
-int	 sockets_create_socket(struct addresslist *, struct portrange, int);
-int	 sockets_open_client(char *, struct portrange *);
+int	 sockets_create_socket(struct addresslist *, in_port_t, int);
+int	 sockets_open_client(char *, in_port_t);
 int	 sockets_privinit(struct socket *);
 int	 sockets_client_cmp(struct client *, struct client *);
 void	 sockets_parse_sockets(struct thingsd *);
@@ -446,11 +441,11 @@ int	 cmdline_symset(char *);
 struct address	*host_v4(const char *);
 struct address	*host_v6(const char *);
 int		 host_dns(const char *, struct addresslist *,
-		    int, struct portrange *, const char *, int);
+		    int, in_port_t, const char *, int);
 int		 host_if(const char *, struct addresslist *,
-		    int, struct portrange *, const char *, int);
+		    int, in_port_t, const char *, int);
 int		 host(const char *, struct addresslist *,
-		    int, struct portrange *, const char *, int);
+		    int, in_port_t, const char *, int);
 int		 is_if_in_group(const char *, const char *);
 
 /* tls.c */
