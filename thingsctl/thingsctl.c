@@ -310,13 +310,13 @@ list_things_msg(struct imsg *imsg)
 		case S_TCP:
 			printf("\tIP Addr:\t\t%s\n", nti->conf.ipaddr);
 			printf("\tConnect Port:\t\t%d\n",
-			    ntohs(nti->conf.tcp_conn_port.val[0]));
+			    ntohs(nti->conf.tcp_conn_port));
 			printf("\tPersists:\t\t%d\n", nti->conf.persist);
 			break;
 		case S_UDP:
 			printf("\tUDP Listener:\t\t%s\n", nti->conf.udp);
 			printf("\tConnect Port:\t\t%d\n",
-			    ntohs(nti->conf.udp_rcv_port.val[0]));
+			    ntohs(nti->conf.udp_rcv_port));
 			break;
 		case S_DEV:
 			printf("\tDevice:\t\t\t%s\n", nti->conf.location);
@@ -334,7 +334,7 @@ list_things_msg(struct imsg *imsg)
 			printf("\tBind Interface:\t\t%s\n",
 			    nti->conf.tcp_iface);
 		printf("\tListen Port:\t\t%d\n",
-		    ntohs(nti->conf.tcp_listen_port.val[0]));
+		    ntohs(nti->conf.tcp_listen_port));
 		printf("\tPassword:\t\t%s\n", nti->conf.password);
 		printf("\tTLS:\t\t\t%s\n", nti->conf.tls ? "Yes" : "No");
 		break;
@@ -361,7 +361,7 @@ list_clients_msg(struct imsg *imsg)
 
 		printf("\nClient Name:\t\t\t%s\n", nci->name);
 		printf("\tfd:\t\t\t%d\n", nci->fd);
-		printf("\tPort:\t\t\t%d\n", ntohs(nci->port.val[0]));
+		printf("\tPort:\t\t\t%d\n", ntohs(nci->port));
 		printf("\tSubscribed:\t\t%s\n", nci->subscribed ? "Yes" : "No");
 		printf("\tTLS:\t\t\t%s\n", nci->tls ? "Yes" : "No");
 		break;
@@ -386,7 +386,7 @@ list_sockets_msg(struct imsg *imsg)
 		printf("\n");
 		printf("Socket Name:\t\t\t%s\n", nsi->conf.name);
 		printf("\tfd:\t\t\t%d\n", nsi->fd);
-		printf("\tPort:\t\t\t%d\n", ntohs(nsi->conf.port.val[0]));
+		printf("\tPort:\t\t\t%d\n", ntohs(nsi->conf.port));
 		printf("\tClient Count:\t\t%zu\n", nsi->client_cnt);
 		if (nsi->conf.max_clients == 0)
 			printf("\tMax Clients:\t\tunlimited\n");
