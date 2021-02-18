@@ -89,10 +89,6 @@ static struct privsep_proc procs[] = {
 	    sockets_shutdown },
 };
 
-/* For the privileged process */
-static struct privsep_proc *proc_priv = &procs[0];
-static struct passwd proc_privpw;
-
 int
 thingsd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 {
@@ -310,11 +306,6 @@ main(int argc, char **argv)
 
 	if ((ps->ps_pw = getpwnam(THINGSD_USER)) == NULL)
 		fatal("unknown user %s", THINGSD_USER);
-
-
-	/* First proc runs as root without pledge but in default chroot */
-	proc_priv->p_pw = &proc_privpw; /* initialized to all 0 */
-	proc_priv->p_chroot = ps->ps_pw->pw_dir; /* from THINGSD_USER */
 
 	/* Configure the control socket */
 	ps->ps_csock.cs_name = THINGSD_SOCKET;
