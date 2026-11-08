@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020-2021 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2019, 2020-2026 Tracey Emery <tracey@openbsd.org>
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -36,7 +36,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "proc.h"
 #include "thingsd.h"
 #include "parser.h"
 
@@ -95,7 +94,9 @@ main(int argc, char *argv[])
 	memset(&sun, 0, sizeof(sun));
 	sun.sun_family = AF_UNIX;
 
-	memcpy(&sun.sun_path, sockname, sizeof(sun.sun_path));
+	if (strlcpy(sun.sun_path, sockname, sizeof(sun.sun_path)) >=
+	    sizeof(sun.sun_path))
+		errx(1, "socket path too long: %s", sockname);
 	if (connect(ctl_sock, (struct sockaddr *)&sun, sizeof(sun)) == -1)
 		err(1, "connect: %s", sockname);
 
@@ -126,7 +127,7 @@ main(int argc, char *argv[])
 	switch (res->action) {
 	case KILL_CLIENT:
 		imsg_compose(ibuf, IMSG_KILL_CLIENT, 0, 0, -1,
-		    res->name, strlen(res->name));
+		    res->name, sizeof(res->name));
 		printf("\nKill request sent for client '%s'.\n", res->name);
 		done = 1;
 		break;
@@ -195,8 +196,8 @@ main(int argc, char *argv[])
 			errx(1, "imsg_read error");
 		if (n == 0) {
 			if (res->action == SHOW_PACKETS)
-				errx(1, "Bad thing name request, or thingsd " \
-				    "shutdown.\n");
+				errx(1, "Bad thing name request, or thingsd "
+				    "shutdown.");
 			else
 				errx(1, "pipe closed");
 		}
@@ -226,7 +227,9 @@ main(int argc, char *argv[])
 					done = 1;
 					break;
 				}
-				printf("%s\n", (char *)imsg.data);
+				printf("%.*s\n",
+				    (int)(imsg.hdr.len - IMSG_HEADER_SIZE),
+				    (char *)imsg.data);
 				break;
 			case SHOW_THINGSD:
 				done = show_parent_msg(&imsg);
@@ -328,7 +331,7 @@ list_things_msg(struct imsg *imsg)
 			printf("\tParity:\t\t\t%s\n", nti->conf.parity);
 			break;
 	}
-		if (strncmp(nti->conf.tcp_iface, "", PKT_BUFF) == 0)
+		if (nti->conf.tcp_iface[0] == '\0')
 			printf("\tBind Interface:\t\tall\n");
 		else
 			printf("\tBind Interface:\t\t%s\n",

@@ -1,4 +1,4 @@
-Copyright (c) 2019 Tracey Emery <tracey@traceyemery.net>
+Copyright (c) 2019-2026 Tracey Emery <tracey@openbsd.org>
 
 Permission to use, copy, modify, and distribute this software for any
 purpose with or without fee is hereby granted, provided that the above

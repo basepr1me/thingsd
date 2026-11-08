@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2020-2021 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2019, 2020-2026 Tracey Emery <tracey@openbsd.org>
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
  *
@@ -31,7 +31,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "proc.h"
 #include "thingsd.h"
 #include "parser.h"
 
@@ -177,9 +176,12 @@ match_token(const char *word, const struct token *table,
 		case CLIENTNAME:
 		case SOCKETNAME:
 			if (!match && word != NULL && strlen(word) > 0) {
-				memset(res->name, 0,
-				    sizeof(res->name));
-				memcpy(&res->name, word, sizeof(res->name));
+				if (strlcpy(res->name, word,
+				    sizeof(res->name)) >= sizeof(res->name)) {
+					fprintf(stderr, "name too long: %s\n",
+					    word);
+					return (NULL);
+				}
 				match++;
 				t = &table[i];
 				if (t->value)

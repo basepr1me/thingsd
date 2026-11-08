@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019-2021 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016, 2019-2026 Tracey Emery <tracey@openbsd.org>
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -39,6 +39,7 @@
 #define CLIENT_SUB_TIME_USEC	 100
 #define CLIENT_SUB_CHK		 1
 #define EB_TIMEOUT		 1
+#define ONESHOT_TIMEOUT		 10
 
 #define TLS_CONFIG_MAX		 511
 #define TLS_CERT		 "/etc/ssl/thing.crt"
@@ -60,10 +61,23 @@
 
 #define PKT_BUFF		 2048
 
+#define THINGSD_MAX_PREFORK	 32
+
 #define MAX_IMSG_DATA_SIZE	(MAX_IMSGSIZE - IMSG_HEADER_SIZE)
+#define IMSG_DATA_SIZE(imsg)	((imsg)->hdr.len - IMSG_HEADER_SIZE)
+#define IMSG_SIZE_CHECK(imsg, p) do {					\
+	if (IMSG_DATA_SIZE(imsg) < sizeof(*p))				\
+		fatalx("bad length imsg received (%s)", #p);		\
+} while (0)
 
 enum imsg_type {
-	IMSG_GET_INFO_THINGSD_REQUEST = IMSG_PROC_MAX,
+	IMSG_NONE,
+	IMSG_CTL_OK,
+	IMSG_CTL_FAIL,
+	IMSG_CTL_VERBOSE,
+	IMSG_CTL_NOTIFY,
+
+	IMSG_GET_INFO_THINGSD_REQUEST,
 	IMSG_GET_INFO_THINGSD_DATA,
 	IMSG_GET_INFO_THINGSD_END_DATA,
 
@@ -98,6 +112,13 @@ enum imsg_type {
 	IMSG_CFG_TLS,
 	IMSG_DIST_THING_PACKAGE,
 	IMSG_DIST_CLIENT_PACKAGE,
+};
+
+struct imsgev {
+	struct imsgbuf		 ibuf;
+	void			(*handler)(int, short, void *);
+	struct event		 ev;
+	short			 events;
 };
 
 /* 
@@ -144,19 +165,16 @@ struct package {
 };
 TAILQ_HEAD(packages, package);
 
+struct socket;
+
 struct client {
 	TAILQ_ENTRY(client)	 entry;
 	struct packages		*packages;
-	int			 id;
 	int			 thing_id;
 	int			 sock_id;
-	void			*sock;
-	void			*sock_conf;
+	struct socket		*sock;
 
-	struct clt_time		*clt;
-	struct evbuffer		*evb;
 	struct bufferevent	*bev;
-	struct event		 ev;
 	struct event		 timeout;
 
 	int			 subscribed;
@@ -173,7 +191,6 @@ struct client {
 TAILQ_HEAD(clientlist, client);
 
 struct socket_config {
-	struct addresslist	*al;
 	char			 iface[THINGSD_MAXTEXT];
 	char			 name[THINGSD_MAXTEXT];
 	char			 thing_name[THINGSD_MAXTEXT];
@@ -328,15 +345,15 @@ struct thing {
 	struct thing_config	 conf;
 	int			 exists;
 
-	/* either DEV, TCP conn, or UDP rcv fd */
+	/* DEV or persistent TCP fd, -1 when not connected */
 	int			 fd;
-
-	/* event for TCP thing fd */
+	int			 connecting;
 	struct bufferevent	*bev;
-	struct evbuffer		*evb;
 
-	/* event for UDP thing fd */
-	struct event		 udp_ev;
+	/* one receiving socket per bound UDP address */
+	int			 udp_fd[THINGSD_MAXIFACE];
+	struct event		 udp_ev[THINGSD_MAXIFACE];
+	int			 udp_nfd;
 };
 TAILQ_HEAD(thinglist, thing);
 
@@ -350,9 +367,7 @@ TAILQ_HEAD(deadthinglist, dead_thing);
 
 struct packet_client {
 	TAILQ_ENTRY(packet_client)	 entry;
-	struct privsep		 ps;
-	struct imsg		 imsg;
-	int			 fd;
+	uint32_t		 peerid;
 	char			 name[THINGSD_MAXNAME];
 };
 TAILQ_HEAD(packetclientlist, packet_client);
@@ -362,7 +377,6 @@ struct thingsd {
 	struct socketlist	*sockets;
 	struct packages		*packages;
 
-	struct privsep		*thingsd_ps;
 	const char		*thingsd_conffile;
 
 	int			 thingsd_debug;
@@ -373,15 +387,11 @@ struct thingsd {
 	char			 udp_iface[THINGSD_MAXTEXT];
 
 	size_t			 max_clients;
-	size_t			 client_cnt;
 	size_t			 conn_retry;
 	uint16_t		 prefork_socks;
 	int			 run;
 
-	/* disconnected things parts */
 	struct deadthinglist	*dead_things;
-	int			 exists;
-	int			 dcount;
 
 	/* things */
 	struct event_base	*thingsd_eb;
@@ -397,6 +407,13 @@ struct thingsd {
 extern struct thingsd	*thingsd_env;
 extern int		 thing_id;
 
+/* parent process pipes, indexed by prefork instance for sockets */
+extern struct imsgev	*parent_iev_control;
+extern struct imsgev	*parent_iev_socks;
+
+/* sockets process pipe to the parent */
+extern struct imsgev	*socks_iev_parent;
+
 /* client.c */
 void	 client_del(struct client *);
 void	 client_rd(struct bufferevent *, void *);
@@ -405,30 +422,34 @@ void	 client_err(struct bufferevent *, short, void *);
 
 /* sockets.c */
 struct socket
-	*sockets_new_socket(char *);
-struct socket
-	*sockets_get_socket(struct thingsd *, int);
-struct socket
 	*sockets_get_socket_byid(struct thingsd *, int);
-int	 sockets_create_socket(struct addresslist *, in_port_t, int);
-int	 sockets_open_client(char *, in_port_t);
+int	 sockets_create_socket(struct sockaddr_storage *, in_port_t, int);
+int	 sockets_open_client(const char *, in_port_t);
 int	 sockets_privinit(struct socket *);
-int	 sockets_client_cmp(struct client *, struct client *);
+size_t	 sockets_thing_client_cnt(int);
 void	 sockets_parse_sockets(struct thingsd *);
-void	 sockets_socket_rlimit(int);
-void	 sockets_sighdlr(int, short, void *);
-void	 sockets_shutdown(void);
-void	 sockets(struct privsep *, struct privsep_proc *);
+void	 sockets_socket_rlimit(void);
+__dead void
+	 sockets(int, int);
 
 /* thingsd.c */
 struct thing	*thingsd_conf_new_thing(struct thingsd *, struct thing *,
 		    char *, int);
+void	 imsg_event_init(struct imsgev *, int, void (*)(int, short, void *));
+void	 imsg_event_add(struct imsgev *);
+int	 imsg_compose_event(struct imsgev *, uint32_t, uint32_t, pid_t, int,
+	    void *, size_t);
+int	 imsg_composev_event(struct imsgev *, uint32_t, uint32_t, pid_t, int,
+	    const struct iovec *, int);
+int	 imsg_forward_event(struct imsgev *, struct imsg *);
+void	 imsg_get_string(struct imsg *, char *, size_t);
+
+/* control.c */
+__dead void
+	 control(int, int *);
 
 /* config.c */
 int	 config_init(struct thingsd *);
-void	 config_purge(struct thingsd *, unsigned int);
-int	 config_setreset(struct thingsd *, unsigned int);
-int	 config_getreset(struct thingsd *, struct imsg *);
 int	 config_setsocks(struct thingsd *, struct socket *);
 int	 config_getsocks(struct thingsd *, struct imsg *);
 int	 config_getcfg(struct thingsd *, struct imsg *);
@@ -436,7 +457,7 @@ int	 config_getsocks_tls(struct thingsd *, struct imsg *);
 
 /* parse.y */
 int	 parse_config(const char *, struct thingsd *);
-int	 parse_buf(struct client *, u_char *, int);
+int	 parse_buf(struct client *, u_char *);
 int	 cmdline_symset(char *);
 struct address	*host_v4(const char *);
 struct address	*host_v6(const char *);
@@ -455,4 +476,25 @@ int	 tls_load_crl(struct socket *);
 int	 tls_load_ocsp(struct socket *);
 void	 socket_tls_load(struct socket *);
 int	 socket_tls_init(struct socket *);
-void	 socket_tls_handshake(int, short, void *);
+
+/* log.c */
+void	 log_init(int, int);
+void	 log_procinit(const char *);
+void	 log_setverbose(int);
+int	 log_getverbose(void);
+void	 log_warn(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+void	 log_warnx(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+void	 log_info(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+void	 log_debug(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+void	 logit(int, const char *, ...)
+	    __attribute__((__format__ (printf, 2, 3)));
+void	 vlog(int, const char *, va_list)
+	    __attribute__((__format__ (printf, 2, 0)));
+__dead void fatal(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));
+__dead void fatalx(const char *, ...)
+	    __attribute__((__format__ (printf, 1, 2)));

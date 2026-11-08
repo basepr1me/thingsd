@@ -21,7 +21,7 @@ about packet data.
 Prerequisites
 -------------
 
-* OpenBSD 6.4 or higher
+* OpenBSD 7.7 or higher
 
 Files
 -----
@@ -41,7 +41,7 @@ Compile and install.
 
 		make
 		doas make install
-		doas addgroup _thingsd
+		doas groupadd _thingsd
 		doas useradd -d /var/empty -L daemon -g _thingsd -s /sbin/nologin _thingsd
 		doas cp examples/etc/rc.d/thingsd /etc/rc.d/
 		doas chown _thingsd /dev/[thingsd.conf devices]

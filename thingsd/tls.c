@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 - 2021 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2019 - 2026 Tracey Emery <tracey@openbsd.org>
  * Copyright (c) 2006 - 2015 Reyk Floeter <reyk@openbsd.org>
  * 	(snippets from httpd functions)
  *
@@ -34,7 +34,6 @@
 #include <event.h>
 #include <tls.h>
 
-#include "proc.h"
 #include "thingsd.h"
 
 int
@@ -192,7 +191,8 @@ socket_tls_init(struct socket *sock)
 			log_warnx("%s: failed to add ca cert(s)", __func__);
 			return (-1);
 		}
-		if (tls_config_set_crl_mem(sock->tls_config,
+		if (sock->conf.tls_crl != NULL &&
+		    tls_config_set_crl_mem(sock->tls_config,
 		    sock->conf.tls_crl, sock->conf.tls_crl_len) != 0) {
 			log_warnx("%s: failed to add crl(s)", __func__);
 			return (-1);
@@ -201,18 +201,6 @@ socket_tls_init(struct socket *sock)
 			tls_config_verify_client_optional(sock->tls_config);
 		else
 			tls_config_verify_client(sock->tls_config);
-	}
-
-	log_debug("%s: adding keypair for listener %s", __func__,
-	    sock->conf.name);
-
-	if (tls_config_add_keypair_ocsp_mem(sock->tls_config,
-	    sock->conf.tls_cert, sock->conf.tls_cert_len,
-	    sock->conf.tls_key, sock->conf.tls_key_len,
-	    sock->conf.tls_ocsp_staple,
-	    sock->conf.tls_ocsp_staple_len) != 0) {
-		log_warnx("%s: failed to add tls keypair", __func__);
-		return (-1);
 	}
 
 	if (tls_configure(sock->tls_ctx, sock->tls_config) != 0) {
@@ -240,43 +228,6 @@ socket_tls_init(struct socket *sock)
 	sock->conf.tls_key_len = 0;
 
 	return (0);
-}
-
-void
-socket_tls_handshake(int fd, short event, void *arg)
-{
-	struct client		*client = (struct client *)arg;
-	struct socket		*sock = client->sock;
-	ssize_t			 ret = 0;
-
-	if (client == NULL)
-		return;
-
-	if (sock->tls_ctx == NULL || client->tls_ctx == NULL)
-		fatalx("NULL tls context");
-
-	ret = tls_handshake(client->tls_ctx);
-
-	if (ret == 0) {
-		event_del(&client->ev);
-		log_debug("%s: tls handshake success", __func__);
-	} else if (ret == TLS_WANT_POLLIN) {
-		event_del(&client->ev);
-		event_set(&client->ev, client->fd, EV_READ|EV_PERSIST,
-			    socket_tls_handshake, client);
-		if (event_add(&client->ev, NULL))
-			log_debug("%s: event add client", __func__);
-	} else if (ret == TLS_WANT_POLLOUT) {
-		event_del(&client->ev);
-		event_set(&client->ev, client->fd, EV_WRITE|EV_PERSIST,
-			    socket_tls_handshake, client);
-		if (event_add(&client->ev, NULL))
-			log_debug("%s: event add client", __func__);
-	} else {
-		event_del(&client->ev);
-		log_debug("%s: tls handshake failed - %s", __func__,
-		    tls_error(client->tls_ctx));
-	}
 }
 
 void

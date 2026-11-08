@@ -1,6 +1,6 @@
 PROG =		thingsd
 SRCS =		parse.y
-SRCS +=		config.c control.c log.c thingsd.c proc.c
+SRCS +=		config.c control.c log.c thingsd.c
 SRCS +=		sockets.c tls.c client.c
 
 MAN =		thingsd.8 thingsd.conf.5

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2021 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2020-2026 Tracey Emery <tracey@openbsd.org>
  * Copyright (c) 2015 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -37,10 +37,7 @@
 #include <errno.h>
 #include <imsg.h>
 
-#include "proc.h"
 #include "thingsd.h"
-
-extern enum privsep_procid privsep_process;
 
 int	 config_setsocks_tls(struct thingsd *, struct socket *);
 static int
@@ -54,37 +51,23 @@ static int
 int
 config_init(struct thingsd *env)
 {
-	struct privsep		*ps = env->thingsd_ps;
-	unsigned int		 what;
+	if ((env->things = calloc(1, sizeof(*env->things))) == NULL)
+		return (-1);
+	if ((env->sockets = calloc(1, sizeof(*env->sockets))) == NULL)
+		return (-1);
+	if ((env->packages = calloc(1, sizeof(*env->packages))) == NULL)
+		return (-1);
+	if ((env->dead_things = calloc(1, sizeof(*env->dead_things))) == NULL)
+		return (-1);
+	env->packet_clients = calloc(1, sizeof(*env->packet_clients));
+	if (env->packet_clients == NULL)
+		return (-1);
+	TAILQ_INIT(env->things);
+	TAILQ_INIT(env->sockets);
+	TAILQ_INIT(env->packages);
+	TAILQ_INIT(env->dead_things);
+	TAILQ_INIT(env->packet_clients);
 
-	/* Global configuration. */
-	if (privsep_process == PROC_PARENT)
-		env->prefork_socks = SOCKS_NUMPROC;
-
-	ps->ps_what[PROC_PARENT] = CONFIG_ALL;
-	ps->ps_what[PROC_SOCKS] = CONFIG_SOCKS;
-
-	/* Other configuration. */
-	what = ps->ps_what[privsep_process];
-	if (what & CONFIG_SOCKS) {
-		if ((env->things = calloc(1, sizeof(*env->things))) == NULL)
-			return (-1);
-		if ((env->sockets = calloc(1, sizeof(*env->sockets))) == NULL)
-			return (-1);
-		if ((env->packages = calloc(1, sizeof(*env->packages))) == NULL)
-			return (-1);
-		if ((env->dead_things = calloc(1,
-		    sizeof(*env->dead_things))) == NULL)
-			return (-1);
-		env->packet_clients = calloc(1, sizeof(*env->packet_clients));
-		if (env->packet_clients == NULL)
-			return (-1);
-		TAILQ_INIT(env->things);
-		TAILQ_INIT(env->sockets);
-		TAILQ_INIT(env->packages);
-		TAILQ_INIT(env->dead_things);
-		TAILQ_INIT(env->packet_clients);
-	}
 	return (0);
 }
 
@@ -92,9 +75,7 @@ int
 config_getcfg(struct thingsd *env, struct imsg *imsg)
 {
 	/* nothing to do but tell parent configuration is done */
-	if (privsep_process != PROC_PARENT)
-		proc_compose(env->thingsd_ps, PROC_PARENT,
-		    IMSG_CFG_DONE, NULL, 0);
+	imsg_compose_event(socks_iev_parent, IMSG_CFG_DONE, 0, 0, -1, NULL, 0);
 
 	return (0);
 }
@@ -114,12 +95,44 @@ config_getsocks(struct thingsd *env, struct imsg *imsg)
 		return (-1);
 	}
 
-	/* create a new socket */
 	if ((sock = calloc(1, sizeof(*sock))) == NULL)
 		return (-1);
+	if ((sock->clients = calloc(1, sizeof(*sock->clients))) == NULL) {
+		free(sock);
+		return (-1);
+	}
+	TAILQ_INIT(sock->clients);
 
 	memcpy(&sock->conf, &sock_conf, sizeof(sock->conf));
-	sock->fd = imsg_get_fd(imsg);
+
+	/*
+	 * The pointers in the config belong to the parent's address space.
+	 * TLS material arrives separately via IMSG_CFG_TLS, the file names
+	 * are only ever used by the parent.
+	 */
+	sock->conf.tls_cert = NULL;
+	sock->conf.tls_cert_file = NULL;
+	sock->conf.tls_cert_len = 0;
+	sock->conf.tls_key = NULL;
+	sock->conf.tls_key_file = NULL;
+	sock->conf.tls_key_len = 0;
+	sock->conf.tls_ca = NULL;
+	sock->conf.tls_ca_file = NULL;
+	sock->conf.tls_ca_len = 0;
+	sock->conf.tls_crl = NULL;
+	sock->conf.tls_crl_file = NULL;
+	sock->conf.tls_crl_len = 0;
+	sock->conf.tls_ocsp_staple = NULL;
+	sock->conf.tls_ocsp_staple_file = NULL;
+	sock->conf.tls_ocsp_staple_len = 0;
+
+	if ((sock->fd = imsg_get_fd(imsg)) == -1) {
+		log_warnx("%s: listener %d arrived without a descriptor",
+		    __func__, sock->conf.id);
+		free(sock->clients);
+		free(sock);
+		return (-1);
+	}
 
 	TAILQ_INSERT_TAIL(env->sockets, sock, entry);
 
@@ -129,57 +142,43 @@ config_getsocks(struct thingsd *env, struct imsg *imsg)
 int
 config_setsocks(struct thingsd *env, struct socket *sock)
 {
-	struct privsep		*ps = env->thingsd_ps;
 	struct socket_config	 u;
-	int			 fd = -1, n, m;
-	struct iovec		 iov[6];
-	size_t			 c;
-	unsigned int		 id, what;
+	int			 fd, n, ret;
 
 	/* setup socket in priv process */
 	if (sockets_privinit(sock) == -1)
 		return (-1);
 
-	for (id = 0; id < PROC_MAX; id++) {
-		what = ps->ps_what[id];
+	memcpy(&u, &sock->conf, sizeof(u));
 
-		if ((what & CONFIG_SOCKS) == 0 || id == privsep_process)
-			continue;
-
-		memcpy(&u, &sock->conf, sizeof(u));
-
-		c = 0;
-		iov[c].iov_base = &u;
-		iov[c++].iov_len = sizeof(u);
-		if (id == PROC_SOCKS) {
-			/* XXX imsg code will close the fd after 1st call */
-			n = -1;
-			proc_range(ps, id, &n, &m);
-			for (n = 0; n < m; n++) {
-				/* send thing fd */
-				if (sock->fd == -1)
-					fd = -1;
-				else if ((fd = dup(sock->fd)) == -1)
-					return (-1);
-				if (proc_composev_imsg(ps, id, n,
-				    IMSG_CFG_SOCKS, -1, fd, iov,
-				    c) != 0) {
-					log_warn("%s: failed to compose "
-					    "IMSG_CFG_SOCKS imsg",
-					    __func__);
-					return (-1);
-				}
-				if (proc_flush_imsg(ps, id, n) == -1) {
-					log_warn("%s: failed to flush "
-					    "IMSG_CFG_SOCKS imsg",
-					    __func__);
-					return (-1);
-				}
-			}
-			/* Configure TLS if necessary. */
-			config_setsocks_tls(env, sock);
+	/*
+	 * imsg closes the passed descriptor once sent, so every sockets
+	 * process gets its own dup. The flush is synchronous because the
+	 * parent pledges without sendfd once configuration is finished.
+	 */
+	for (n = 0; n < env->prefork_socks; n++) {
+		if (sock->fd == -1)
+			fd = -1;
+		else if ((fd = dup(sock->fd)) == -1)
+			return (-1);
+		if (imsg_compose(&parent_iev_socks[n].ibuf, IMSG_CFG_SOCKS, 0,
+		    0, fd, &u, sizeof(u)) == -1) {
+			log_warn("%s: failed to compose IMSG_CFG_SOCKS imsg",
+			    __func__);
+			return (-1);
+		}
+		do
+			ret = imsgbuf_flush(&parent_iev_socks[n].ibuf);
+		while (ret == -1 && errno == EAGAIN);
+		if (ret == -1) {
+			log_warn("%s: failed to flush IMSG_CFG_SOCKS imsg",
+			    __func__);
+			return (-1);
 		}
 	}
+
+	/* Configure TLS if necessary. */
+	config_setsocks_tls(env, sock);
 
 	/* Close thing socket early to prevent fd exhaustion in thingsd. */
 	if (sock->fd != -1) {
@@ -193,18 +192,17 @@ static int
 config_settls(struct thingsd *env, struct socket *sock,
     enum tls_config_type type, const char *label, uint8_t *data, size_t len)
 {
-	struct privsep		*ps = env->thingsd_ps;
 	struct socket_config	*sock_conf = &sock->conf;
 	struct tls_config	 tls;
 	struct iovec		 iov[2];
 	size_t			 c;
+	int			 n;
 
 	if (data == NULL || len == 0)
 		return (0);
 
-	DPRINTF("%s: sending tls %s for \"%s[%u]\" to %s fd %d", __func__,
-	    label, sock_conf->name, sock_conf->id, ps->ps_title[PROC_SOCKS],
-	    sock->fd);
+	log_debug("%s: sending tls %s for \"%s[%u]\" to sockets fd %d",
+	    __func__, label, sock_conf->name, sock_conf->id, sock->fd);
 
 	memset(&tls, 0, sizeof(tls));
 	tls.id = sock_conf->id;
@@ -223,10 +221,14 @@ config_settls(struct thingsd *env, struct socket *sock,
 		iov[c].iov_base = data;
 		iov[c++].iov_len = tls.tls_chunk_len;
 
-		if (proc_composev(ps, PROC_SOCKS, IMSG_CFG_TLS, iov, c) != 0) {
-			log_warn("%s: failed to compose IMSG_CFG_TLS imsg for "
-			    "`%s'", __func__, sock_conf->name);
-			return (-1);
+		for (n = 0; n < env->prefork_socks; n++) {
+			if (imsg_composev_event(&parent_iev_socks[n],
+			    IMSG_CFG_TLS, 0, 0, -1, iov, c) == -1) {
+				log_warn("%s: failed to compose IMSG_CFG_TLS "
+				    "imsg for `%s'", __func__,
+				    sock_conf->name);
+				return (-1);
+			}
 		}
 
 		tls.tls_chunk_offset += tls.tls_chunk_len;
@@ -275,18 +277,13 @@ config_gettls(struct thingsd *env, struct socket_config *sock_conf,
     struct tls_config *tls_conf, const char *label, uint8_t *data, size_t len,
     uint8_t **outdata, size_t *outlen)
 {
-#ifdef DEBUG
-	struct privsep		*ps = env->thingsd_ps;
-#endif
-
-	DPRINTF("%s: %s %d getting tls %s (%zu:%zu@%zu) for \"%s[%u]\"",
-	    __func__, ps->ps_title[privsep_process], ps->ps_instance, label,
-	    tls_conf->tls_len, len, tls_conf->tls_chunk_offset, sock_conf->name,
-	    sock_conf->id);
+	log_debug("%s: getting tls %s (%zu:%zu@%zu) for \"%s[%u]\"",
+	    __func__, label, tls_conf->tls_len, len,
+	    tls_conf->tls_chunk_offset, sock_conf->name, sock_conf->id);
 
 	if (tls_conf->tls_chunk_offset == 0) {
-		*outdata = NULL;
 		free(*outdata);
+		*outdata = NULL;
 		*outlen = 0;
 		if ((*outdata = calloc(1, tls_conf->tls_len)) == NULL)
 			goto fail;
@@ -386,48 +383,4 @@ config_getsocks_tls(struct thingsd *env, struct imsg *imsg)
 
  fail:
 	return (-1);
-}
-
-void
-config_purge(struct thingsd *env, unsigned int reset)
-{
-	struct privsep		*ps = env->thingsd_ps;
-	struct thing		*thing;
-	unsigned int		 what;
-
-	what = ps->ps_what[privsep_process];
-	if (what & CONFIG_SOCKS) {
-		while ((thing = TAILQ_FIRST(env->things)) != NULL) {
-			TAILQ_REMOVE(env->things, thing, entry);
-			free(thing);
-		}
-	}
-}
-
-int
-config_setreset(struct thingsd *env, unsigned int reset)
-{
-	struct privsep	*ps = env->thingsd_ps;
-	unsigned int	 id;
-
-	for (id = 0; id < PROC_MAX; id++) {
-		if (id == privsep_process)
-			continue;
-		proc_compose(ps, id, IMSG_CTL_RESET, &reset, sizeof(reset));
-	}
-
-	return (0);
-}
-
-int
-config_getreset(struct thingsd *env, struct imsg *imsg)
-{
-	unsigned int	 mode;
-
-	IMSG_SIZE_CHECK(imsg, &mode);
-	memcpy(&mode, imsg->data, sizeof(mode));
-
-	config_purge(env, mode);
-
-	return (0);
 }

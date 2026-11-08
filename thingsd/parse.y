@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2021 Tracey Emery <tracey@traceyemery.net>
+ * Copyright (c) 2016-2026 Tracey Emery <tracey@openbsd.org>
  * Copyright (c) 2020 Matthias Pressfreund <mpfr@fn.de>
  * Copyright (c) 2007 - 2015 Reyk Floeter <reyk@openbsd.org>
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -50,7 +50,6 @@
 #include <tls.h>
 #include <unistd.h>
 
-#include "proc.h"
 #include "thingsd.h"
 
 TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
@@ -90,8 +89,6 @@ int	 getservice(char *);
 int	 symset(const char *, const char *, int);
 char	*symget(const char *);
 
-void	 clear_config(struct thingsd *xconf);
-
 static int		 errors;
 
 int		 get_addrs(const char *, struct addresslist *, in_port_t);
@@ -99,13 +96,20 @@ int		 get_addrs(const char *, struct addresslist *, in_port_t);
 static struct thingsd		*thingsd;
 static struct thing		*new_thing;
 
-const int		 baudrates[18] = {50, 75, 110, 134, 150, 200,
+const int		 baudrates[] = {50, 75, 110, 134, 150, 200,
 			    300, 600, 1200, 1800, 2400, 4800, 9600,
-			    38400, 57600, 76800, 115200};
-const char		*parity[4] = {"none", "odd", "even", "space"};
-struct client		*pclient, *tclient;
-char			 my_name[THINGSD_MAXTEXT];
-int			 my_fd, pkt_len;
+			    19200, 38400, 57600, 76800, 115200};
+const char		*parity[] = {"none", "odd", "even"};
+struct client		*pclient;
+
+/*
+ * The same grammar parses thingsd.conf in the parent and subscription
+ * packets in the sockets processes.  yylex() hands out one of these
+ * before anything else so a packet can only ever reach the subscribe
+ * rule.
+ */
+static int		 start_token;
+static int		 parsing_pkt;
 
 typedef struct {
 	union {
@@ -118,6 +122,7 @@ typedef struct {
 
 %}
 
+%token	CONFIG_START PKT_START
 %token	BAUD BIND CA CERTIFICATE CIPHERS CLIENT CLIENTS CONNECT CONNECTION CRL
 %token	DATA DHE ECDHE ERROR HARDWARE INCLUDE INTERFACE IPADDR KEY
 %token	LISTEN LOCATION MAX NAME OCSP ON OPTIONAL PARITY PASSWORD PERSISTENT
@@ -132,25 +137,28 @@ typedef struct {
 
 %%
 
-grammar		: /* empty */
-		| grammar include '\n'
-		| grammar '\n'
-		| grammar conf_main '\n'
-		| grammar dosub
-		| grammar error '\n'		{ file->errors++; }
-		| grammar thing '\n'
-		| grammar varset '\n'
+grammar		: CONFIG_START config
+		| PKT_START optnl dosub optnl
+		;
+
+config		: /* empty */
+		| config include '\n'
+		| config '\n'
+		| config conf_main '\n'
+		| config error '\n'		{ file->errors++; }
+		| config thing '\n'
+		| config varset '\n'
 		;
 
 conf_main	: bindopts1
 		| maxclients
 		| PREFORK NUMBER {
-			thingsd->prefork_socks = $2;
-			if ($2 <= 0 || $2 > PROC_MAX_INSTANCES) {
+			if ($2 <= 0 || $2 > THINGSD_MAX_PREFORK) {
 				yyerror("invalid number of preforked "
 				    "sockets: %lld", $2);
 				YYERROR;
 			}
+			thingsd->prefork_socks = $2;
 		}
 		| thingretry
 		;
@@ -162,7 +170,6 @@ bindopts1	: BIND TCP INTERFACE STRING {
 				yyerror("%s: thingsd tcp_iface truncated",
 				    __func__);
 				free($4);
-				free(thingsd);
 				YYERROR;
 			}
 			if (strlcpy(thingsd->udp_iface, $4,
@@ -171,7 +178,6 @@ bindopts1	: BIND TCP INTERFACE STRING {
 				yyerror("%s: thingsd udp_iface truncated",
 				    __func__);
 				free($4);
-				free(thingsd);
 				YYERROR;
 			}
 			free($4);
@@ -185,7 +191,6 @@ bindopts1	: BIND TCP INTERFACE STRING {
 				yyerror("%s: thingsd udp_iface truncated",
 				    __func__);
 				free($4);
-				free(thingsd);
 				YYERROR;
 			}
 			free($4);
@@ -199,7 +204,6 @@ bindopts2	: BIND TCP INTERFACE STRING {
 				yyerror("%s: new_thing tcp_iface truncated",
 				    __func__);
 				free($4);
-				free(new_thing);
 				YYERROR;
 			}
 			if (strlen(new_thing->conf.udp_iface) == 0) {
@@ -209,7 +213,6 @@ bindopts2	: BIND TCP INTERFACE STRING {
 					yyerror("%s: new_thing udp_iface "
 					    "truncated", __func__);
 					free($4);
-					free(new_thing);
 					YYERROR;
 				}
 			}
@@ -222,7 +225,6 @@ bindopts2	: BIND TCP INTERFACE STRING {
 				yyerror("%s: new_thing udp_iface truncated",
 				    __func__);
 				free($4);
-				free(new_thing);
 				YYERROR;
 			}
 			free($4);
@@ -274,9 +276,9 @@ locationopts	: /* empty */
 
 locationopts1	: bindopts2
 		| BAUD NUMBER {
-			int		 bc;
-			const int	 bauds = (sizeof(baudrates) /
-					    sizeof(const int));
+			size_t		 bc;
+			const size_t	 bauds = (sizeof(baudrates) /
+					    sizeof(baudrates[0]));
 
 			new_thing->conf.baud = -1;
 			for (bc = 0; bc < bauds; bc++) {
@@ -324,15 +326,14 @@ locationopts1	: bindopts2
 				yyerror("%s: new_thing password truncated",
 				    __func__);
 				free($2);
-				free(new_thing);
 				YYERROR;
 			}
 			free($2);
 		}
 		| PARITY STRING {
-			int		 pc;
-			const int	 parities = (sizeof(parity) /
-					     sizeof(const char *));
+			size_t		 pc;
+			const size_t	 parities = (sizeof(parity) /
+					     sizeof(parity[0]));
 
 			for (pc = 0; pc < parities; pc++) {
 				if (strcmp($2, parity[pc]) == 0) {
@@ -342,7 +343,6 @@ locationopts1	: bindopts2
 						yyerror("%s: new_thing parity "
 						    "truncated", __func__);
 						free($2);
-						free(new_thing);
 						YYERROR;
 					}
 					continue;
@@ -359,7 +359,7 @@ locationopts1	: bindopts2
 			if ($2 > 1 || $2 < 0) {
 				yyerror("software syntax error");
 				YYERROR;
-			} else
+			} else if ($2 > 0)
 				new_thing->conf.sw_ctl = 1;
 		}
 		| STOP NUMBER {
@@ -382,19 +382,30 @@ locationopts2	: locationopts2 locationopts1 nl
 		;
 
 maxclients	: MAX CLIENTS NUMBER {
+			if ($3 < 0) {
+				yyerror("invalid max clients: %lld", $3);
+				YYERROR;
+			}
 			thingsd->max_clients = $3;
 		}
 		;
 
 maxclientssub	: MAX CLIENTS NUMBER {
+			if ($3 < 0) {
+				yyerror("invalid max clients: %lld", $3);
+				YYERROR;
+			}
 			new_thing->conf.max_clients = $3;
 		}
 		;
 
 name		: NAME optcomma STRING {
-			memset(&my_name, 0, sizeof(my_name));
-			memcpy(&pclient->name, $3, sizeof(pclient->name));
-			memcpy(&my_name, $3, sizeof(my_name));
+			if (strlcpy(pclient->name, $3,
+			    sizeof(pclient->name)) >= sizeof(pclient->name)) {
+				yyerror("client name too long");
+				free($3);
+				YYERROR;
+			}
 			free($3);
 		}
 		;
@@ -459,7 +470,6 @@ socketopts1	: CONNECT ON PORT port {
 				yyerror("%s: new_thing password truncated",
 				    __func__);
 				free($2);
-				free(new_thing);
 				YYERROR;
 			}
 			free($2);
@@ -503,74 +513,55 @@ subopts		: {
 
 subthings	: THING '{' STRING optcomma STRING '}' {
 			struct socket	*sock = pclient->sock, *tsock;
-			struct socket	*psock = NULL, *csock = NULL;
 			struct client	*clt;
+
+			if (pclient->subscribed)
+				goto done;
+
+			if (pclient->name[0] == '\0') {
+				log_debug("subscription without client name");
+				goto done;
+			}
 
 			/* check thing name */
 			if ((strcmp(sock->conf.thing_name, $3)) != 0)
 				goto done;
 
 			/* check we have the password */
-			if (strcmp(sock->conf.password, $5) != 0)
-				goto done;
-
-			/* check that ports match */
-			if (sock->conf.port != pclient->port)
+			if (strlen(sock->conf.password) != strlen($5) ||
+			    timingsafe_bcmp(sock->conf.password, $5,
+			    strlen($5)) != 0)
 				goto done;
 
 			/*
-			 * XXX: check from here down don't actually work
-			 * when prefork is > 1
-			 * come back and figure this out later
-			 * probably a way to loop through the processes and
-			 * check all
+			 * XXX: the duplicate name and max clients checks
+			 * only see this sockets process, so with prefork
+			 * greater than one they are per process limits.
 			 */
-
-			/* check for duplicate name on socket */
 			TAILQ_FOREACH(tsock, thingsd_env->sockets, entry) {
 				TAILQ_FOREACH(clt, tsock->clients, entry) {
-					if (strcmp(clt->name, my_name) == 0 &&
-					    clt->subscribed) {
-						log_warnx("client exists");
+					if (clt->subscribed && strcmp(clt->name,
+					    pclient->name) == 0) {
+						log_warnx("client exists: %s",
+						    pclient->name);
 						goto done;
 					}
 				}
 			}
 
-			/* check parent/child counts */
-			if (sock->conf.child_id) {
-				TAILQ_FOREACH(csock, thingsd_env->sockets,
-				    entry)
-					if (csock->conf.id ==
-					    sock->conf.child_id)
-						break;
-			}
-			if (sock->conf.parent_id) {
-				TAILQ_FOREACH(psock, thingsd_env->sockets,
-				    entry)
-					if (psock->conf.id ==
-					    sock->conf.parent_id)
-						break;
-			}
-
-			/* if counts are fine, subscribe client */
 			if (sock->conf.max_clients > 0 &&
-			    (sock->client_cnt + 1 >
-			    sock->conf.max_clients)) {
+			    sockets_thing_client_cnt(sock->conf.thing_id) >=
+			    sock->conf.max_clients) {
 				log_debug("max clients reached for listener %d",
 				    sock->conf.id);
-			} else {
-				pclient->subscribed = 1;
-
-				sock->client_cnt++;
-				if (csock != NULL)
-					csock->client_cnt++;
-				if (psock != NULL)
-					psock->client_cnt++;
-
-				log_debug("client %s subscribed to %s",
-				    pclient->name, $3);
+				goto done;
 			}
+
+			pclient->subscribed = 1;
+			sock->client_cnt++;
+
+			log_debug("client %s subscribed to %s",
+			    pclient->name, $3);
 done:
 			free($3);
 			free($5);
@@ -582,16 +573,18 @@ subthings2	: subthings2 subthings
 		;
 
 thing		: THING STRING {
-       			thing_id++;
+			if (strlen($2) >= THINGSD_MAXNAME) {
+				yyerror("thing name too long: %s", $2);
+				free($2);
+				YYERROR;
+			}
+
+			thing_id++;
 			new_thing = thingsd_conf_new_thing(thingsd_env, NULL,
 			    $2, thing_id);
-
-			if (strlcpy(new_thing->conf.name, $2,
-			    sizeof(new_thing->conf.name)) >=
-			    sizeof(new_thing->conf.name)) {
-				yyerror("thing name truncated");
+			if (new_thing == NULL) {
+				yyerror("thing %s already defined", $2);
 				free($2);
-				free(new_thing);
 				YYERROR;
 			}
 
@@ -600,7 +593,6 @@ thing		: THING STRING {
 			    sizeof(new_thing->conf.name)) {
 				yyerror("thing name truncated");
 				free($2);
-				free(new_thing);
 				YYERROR;
 			}
 
@@ -616,7 +608,6 @@ thing		: THING STRING {
 					yyerror("%s: new_thing tcp_iface "
 					    "truncated",
 					    __func__);
-					free(new_thing);
 					YYERROR;
 				}
 			} else
@@ -643,7 +634,6 @@ thing		: THING STRING {
 					yyerror("%s: new_thing udp_iface "
 					    "truncated",
 					    __func__);
-					free(new_thing);
 					YYERROR;
 				}
 			} else
@@ -754,7 +744,6 @@ thingopts1	: IPADDR STRING {
 				yyerror("%s: new_thing ipaddr truncated",
 				    __func__);
 				free($2);
-				free(new_thing);
 				YYERROR;
 			}
 			new_thing->conf.type = S_TCP;
@@ -767,7 +756,6 @@ thingopts1	: IPADDR STRING {
 				yyerror("%s: new_thing location truncated",
 				    __func__);
 				free($2);
-				free(new_thing);
 				YYERROR;
 			}
 			new_thing->conf.type = S_DEV;
@@ -780,7 +768,6 @@ thingopts1	: IPADDR STRING {
 				yyerror("%s: new_thing udp truncated",
 				    __func__);
 				free($2);
-				free(new_thing);
 				YYERROR;
 			}
 			new_thing->conf.type = S_UDP;
@@ -918,7 +905,10 @@ yyerror(const char *fmt, ...)
 	if (vasprintf(&msg, fmt, ap) == -1)
 		fatalx("yyerror vasprintf");
 	va_end(ap);
-	logit(LOG_CRIT, "%s:%d: %s", file->name, yylval.lineno, msg);
+	if (parsing_pkt)
+		log_debug("%s: %s", file->name, msg);
+	else
+		logit(LOG_CRIT, "%s:%d: %s", file->name, yylval.lineno, msg);
 	free(msg);
 	return (0);
 }
@@ -1003,11 +993,8 @@ lgetc(int quotec)
 	if (parsebuf) {
 		/* Read character from the parsebuffer instead of input. */
 		if (parseindex >= 0) {
-			if (parsebuf == NULL)
-				return (0);
-			if (parseindex > pkt_len)
-				return (0);
-			if ((c = parsebuf[parseindex++]) != '\0')
+			c = parsebuf[parseindex++];
+			if (c != '\0')
 				return (c);
 			parsebuf = NULL;
 		} else
@@ -1017,13 +1004,15 @@ lgetc(int quotec)
 	if (pushback_index)
 		return (pushback_buffer[--pushback_index]);
 
-	if (quotec) {
-		if (parseindex > 0) {
-			/* malformed packet */
+	/* a packet has no stream behind it, the buffer is all there is */
+	if (parsing_pkt) {
+		if (quotec)
 			yyerror("reached end of packet while parsing "
-			"quoted string");
-			return (-1);
-		}
+			    "quoted string");
+		return (EOF);
+	}
+
+	if (quotec) {
 		c = getc(file->stream);
 		if (c == EOF)
 			yyerror("reached end of file while parsing "
@@ -1092,6 +1081,12 @@ yylex(void)
 	unsigned char	*p, *val;
 	int		 quotec, next, c;
 	int		 token;
+
+	if (start_token) {
+		token = start_token;
+		start_token = 0;
+		return (token);
+	}
 
 top:
 	p = buf;
@@ -1339,9 +1334,11 @@ parse_config(const char *filename, struct thingsd *env)
 	thingsd = env;
 
 	thingsd->conn_retry = CONN_RETRY;
-	/* thingsd->dead_things->run = 1; */
+	thingsd->prefork_socks = SOCKS_NUMPROC;
 	thingsd->run = 1;
 
+	parsing_pkt = 0;
+	start_token = CONFIG_START;
 	yyparse();
 	errors = file->errors;
 	closefile(file);
@@ -1419,7 +1416,8 @@ cmdline_symset(char *s)
 	if ((sym = malloc(len)) == NULL)
 		fatal("%s: malloc", __func__);
 
-	memcpy(&sym, s, len);
+	memcpy(sym, s, len - 1);
+	sym[len - 1] = '\0';
 
 	ret = symset(sym, val + 1, 1);
 	free(sym);
@@ -1442,34 +1440,27 @@ symget(const char *nam)
 }
 
 int
-parse_buf(struct client *client, u_char *pkt, int len)
+parse_buf(struct client *client, u_char *pkt)
 {
-	pkt_len = len;
 	pclient = client;
-	my_fd = client->fd;
 
 	if ((file = newbuff(pkt)) == NULL)
 		return (-1);
+
+	/* nothing from a previous packet may leak into this one */
+	pushback_index = 0;
+	parseindex = 0;
+	parsing_pkt = 1;
+	start_token = PKT_START;
 
 	yyparse();
 	errors = file->errors;
 
 	closebuff(file);
+	parsebuf = NULL;
+	pclient = NULL;
 
 	return (errors ? -1 : 0);
-}
-
-void
-clear_config(struct thingsd *xconf)
-{
-	struct thing	*thing;
-
-	while ((thing = TAILQ_FIRST(xconf->things)) != NULL) {
-		TAILQ_REMOVE(xconf->things, thing, entry);
-		free(thing);
-	}
-
-	free(xconf);
 }
 
 int
