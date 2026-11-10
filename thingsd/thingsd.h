@@ -57,11 +57,7 @@
 #define THINGSD_MAXPORT		 6
 #define THINGSD_MAXIFACE	 16
 
-#define SOCKS_NUMPROC		 3
-
 #define PKT_BUFF		 2048
-
-#define THINGSD_MAX_PREFORK	 32
 
 #define MAX_IMSG_DATA_SIZE	(MAX_IMSGSIZE - IMSG_HEADER_SIZE)
 #define IMSG_DATA_SIZE(imsg)	((imsg)->hdr.len - IMSG_HEADER_SIZE)
@@ -388,7 +384,6 @@ struct thingsd {
 
 	size_t			 max_clients;
 	size_t			 conn_retry;
-	uint16_t		 prefork_socks;
 	int			 run;
 
 	struct deadthinglist	*dead_things;
@@ -407,7 +402,7 @@ struct thingsd {
 extern struct thingsd	*thingsd_env;
 extern int		 thing_id;
 
-/* parent process pipes, indexed by prefork instance for sockets */
+/* parent process pipes to the control and sockets processes */
 extern struct imsgev	*parent_iev_control;
 extern struct imsgev	*parent_iev_socks;
 
@@ -446,7 +441,7 @@ void	 imsg_get_string(struct imsg *, char *, size_t);
 
 /* control.c */
 __dead void
-	 control(int, int *);
+	 control(int, int);
 
 /* config.c */
 int	 config_init(struct thingsd *);

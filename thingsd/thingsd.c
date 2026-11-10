@@ -179,7 +179,7 @@ thingsd_dispatch_control(int fd, short event, void *arg)
 	struct imsgbuf	*ibuf = &iev->ibuf;
 	struct imsg	 imsg;
 	struct thing	*thing;
-	int		 i, n, res = 0, verbose, exists;
+	int		 n, res = 0, verbose, exists;
 	unsigned int	 v;
 	char		 thing_name[THINGSD_MAXNAME];
 	char		 client_name[THINGSD_MAXNAME];
@@ -238,8 +238,7 @@ thingsd_dispatch_control(int fd, short event, void *arg)
 			/* FALLTHROUGH */
 		case IMSG_GET_INFO_CLIENTS_REQUEST:
 		case IMSG_GET_INFO_SOCKETS_REQUEST:
-			for (i = 0; i < thingsd_env->prefork_socks; i++)
-				imsg_forward_event(&parent_iev_socks[i], &imsg);
+			imsg_forward_event(parent_iev_socks, &imsg);
 			break;
 		case IMSG_GET_INFO_THINGS_REQUEST:
 		case IMSG_GET_INFO_THINGS_REQUEST_ROOT:
@@ -252,8 +251,7 @@ thingsd_dispatch_control(int fd, short event, void *arg)
 			IMSG_SIZE_CHECK(&imsg, &verbose);
 			memcpy(&verbose, imsg.data, sizeof(verbose));
 			log_setverbose(verbose);
-			for (i = 0; i < thingsd_env->prefork_socks; i++)
-				imsg_forward_event(&parent_iev_socks[i], &imsg);
+			imsg_forward_event(parent_iev_socks, &imsg);
 			break;
 		default:
 			log_warnx("%s: unexpected imsg %d from control",
@@ -358,11 +356,10 @@ main(int argc, char **argv)
 	struct thingsd		*env;
 	struct timeval		 eb_timeout;
 	const char		*conffile = THINGSD_CONF;
-	int			 ch, i, n;
+	int			 ch;
 	int			 pipe_control[2];
-	int			 pipe_socks[THINGSD_MAX_PREFORK][2];
-	int			 pipe_control_socks[THINGSD_MAX_PREFORK][2];
-	int			 fd_socks[THINGSD_MAX_PREFORK];
+	int			 pipe_socks[2];
+	int			 pipe_control_socks[2];
 
 	if ((env = calloc(1, sizeof(*env))) == NULL)
 		fatal("%s: calloc", __func__);
@@ -437,58 +434,44 @@ main(int argc, char **argv)
 	 * together.  Each child closes the ends it does not own.
 	 */
 	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, PF_UNSPEC,
-	    pipe_control) == -1)
+	    pipe_control) == -1 ||
+	    socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, PF_UNSPEC,
+	    pipe_socks) == -1 ||
+	    socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, PF_UNSPEC,
+	    pipe_control_socks) == -1)
 		fatal("%s: socketpair", __func__);
-	for (i = 0; i < env->prefork_socks; i++) {
-		if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, PF_UNSPEC,
-		    pipe_socks[i]) == -1)
-			fatal("%s: socketpair", __func__);
-		if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, PF_UNSPEC,
-		    pipe_control_socks[i]) == -1)
-			fatal("%s: socketpair", __func__);
-	}
 
+	/* control: parent[1], control_socks[0] */
 	switch (fork()) {
 	case -1:
 		fatal("%s: fork", __func__);
 	case 0:
 		close(pipe_control[0]);
-		for (i = 0; i < env->prefork_socks; i++) {
-			close(pipe_socks[i][0]);
-			close(pipe_socks[i][1]);
-			close(pipe_control_socks[i][1]);
-			fd_socks[i] = pipe_control_socks[i][0];
-		}
-		control(pipe_control[1], fd_socks);
+		close(pipe_socks[0]);
+		close(pipe_socks[1]);
+		close(pipe_control_socks[1]);
+		control(pipe_control[1], pipe_control_socks[0]);
 		/* NOTREACHED */
 	}
 
-	for (n = 0; n < env->prefork_socks; n++) {
-		switch (fork()) {
-		case -1:
-			fatal("%s: fork", __func__);
-		case 0:
-			close(pipe_control[0]);
-			close(pipe_control[1]);
-			for (i = 0; i < env->prefork_socks; i++) {
-				close(pipe_socks[i][0]);
-				close(pipe_control_socks[i][0]);
-				if (i == n)
-					continue;
-				close(pipe_socks[i][1]);
-				close(pipe_control_socks[i][1]);
-			}
-			sockets(pipe_socks[n][1], pipe_control_socks[n][1]);
-			/* NOTREACHED */
-		}
+	/* sockets: socks[1], control_socks[1] */
+	switch (fork()) {
+	case -1:
+		fatal("%s: fork", __func__);
+	case 0:
+		close(pipe_control[0]);
+		close(pipe_control[1]);
+		close(pipe_socks[0]);
+		close(pipe_control_socks[0]);
+		sockets(pipe_socks[1], pipe_control_socks[1]);
+		/* NOTREACHED */
 	}
 
+	/* parent: the [0] end of every pipe to a child */
 	close(pipe_control[1]);
-	for (i = 0; i < env->prefork_socks; i++) {
-		close(pipe_socks[i][1]);
-		close(pipe_control_socks[i][0]);
-		close(pipe_control_socks[i][1]);
-	}
+	close(pipe_socks[1]);
+	close(pipe_control_socks[0]);
+	close(pipe_control_socks[1]);
 
 	env->thingsd_eb = event_init();
 
@@ -510,12 +493,10 @@ main(int argc, char **argv)
 	imsg_event_init(parent_iev_control, pipe_control[0],
 	    thingsd_dispatch_control);
 
-	if ((parent_iev_socks = calloc(env->prefork_socks,
-	    sizeof(*parent_iev_socks))) == NULL)
+	if ((parent_iev_socks = calloc(1, sizeof(*parent_iev_socks))) == NULL)
 		fatal("%s: calloc", __func__);
-	for (i = 0; i < env->prefork_socks; i++)
-		imsg_event_init(&parent_iev_socks[i], pipe_socks[i][0],
-		    thingsd_dispatch_sockets);
+	imsg_event_init(parent_iev_socks, pipe_socks[0],
+	    thingsd_dispatch_sockets);
 
 	if (thingsd_configure(env) == -1)
 		fatalx("configuration failed");
@@ -551,9 +532,8 @@ thingsd_configure(struct thingsd *env)
 {
 	struct thing		*thing;
 	struct socket		*sock;
-	int			 n;
 
-	env->socks_reload = env->prefork_socks;
+	env->socks_reload = 1;
 
 	/* setup our things, which run privileged */
 	TAILQ_FOREACH(thing, env->things, entry)
@@ -567,9 +547,7 @@ thingsd_configure(struct thingsd *env)
 
 	imsg_compose_event(parent_iev_control, IMSG_CFG_DONE, 0, 0, -1,
 	    NULL, 0);
-	for (n = 0; n < env->prefork_socks; n++)
-		imsg_compose_event(&parent_iev_socks[n], IMSG_CFG_DONE, 0, 0,
-		    -1, NULL, 0);
+	imsg_compose_event(parent_iev_socks, IMSG_CFG_DONE, 0, 0, -1, NULL, 0);
 
 	return (0);
 }
@@ -577,8 +555,6 @@ thingsd_configure(struct thingsd *env)
 void
 thingsd_configure_done(struct thingsd *env)
 {
-	int	 n;
-
 	if (env->socks_reload == 0) {
 		log_warnx("%s: configuration already finished", __func__);
 		return;
@@ -588,9 +564,8 @@ thingsd_configure_done(struct thingsd *env)
 	if (env->socks_reload == 0) {
 		imsg_compose_event(parent_iev_control, IMSG_CTL_START, 0, 0,
 		    -1, NULL, 0);
-		for (n = 0; n < env->prefork_socks; n++)
-			imsg_compose_event(&parent_iev_socks[n],
-			    IMSG_CTL_START, 0, 0, -1, NULL, 0);
+		imsg_compose_event(parent_iev_socks, IMSG_CTL_START, 0, 0, -1,
+		    NULL, 0);
 	}
 }
 
@@ -598,17 +573,15 @@ __dead void
 thingsd_shutdown(struct thingsd *env)
 {
 	pid_t	 pid;
-	int	 n, status;
+	int	 status;
 
 	/* closing the pipes tells the children to exit */
 	event_del(&parent_iev_control->ev);
 	imsgbuf_clear(&parent_iev_control->ibuf);
 	close(parent_iev_control->ibuf.fd);
-	for (n = 0; n < env->prefork_socks; n++) {
-		event_del(&parent_iev_socks[n].ev);
-		imsgbuf_clear(&parent_iev_socks[n].ibuf);
-		close(parent_iev_socks[n].ibuf.fd);
-	}
+	event_del(&parent_iev_socks->ev);
+	imsgbuf_clear(&parent_iev_socks->ibuf);
+	close(parent_iev_socks->ibuf.fd);
 	free(parent_iev_control);
 	free(parent_iev_socks);
 
@@ -1101,19 +1074,15 @@ thingsd_write_to_socks(struct packages *packages)
 	struct package		*package, *tpkg, p;
 	struct packet_client	*packet_client;
 	struct thing		*thing = NULL;
-	int			 n;
 
 	TAILQ_FOREACH_SAFE(package, packages, entry, tpkg) {
 		memcpy(&p, package, sizeof(p));
 
-		for (n = 0; n < thingsd_env->prefork_socks; n++) {
-			if (imsg_compose_event(&parent_iev_socks[n],
-			    IMSG_DIST_THING_PACKAGE, 0, 0, -1, &p,
-			    sizeof(p)) == -1) {
-				log_warn("%s: failed to compose "
-				    "IMSG_DIST_THING_PACKAGE imsg", __func__);
-				return;
-			}
+		if (imsg_compose_event(parent_iev_socks,
+		    IMSG_DIST_THING_PACKAGE, 0, 0, -1, &p, sizeof(p)) == -1) {
+			log_warn("%s: failed to compose "
+			    "IMSG_DIST_THING_PACKAGE imsg", __func__);
+			return;
 		}
 
 		TAILQ_FOREACH(thing, thingsd_env->things, entry) {

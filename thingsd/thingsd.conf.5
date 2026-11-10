@@ -67,11 +67,6 @@ Range is 30-600 seconds.
 .It Ic max clients Ar number
 Set the default maximum number of clients allowed to connect to each
 .Xr thingsd 8 thing.
-.It Ic prefork Ar number
-Run the specified number of things processes.
-This increases the performance and prevents delays when connecting to a thing.
-.Xr thingsd 8
-runs 3 things processes by default.
 .El
 .Sh THINGS
 things represent a serial, TCP/IP, or UDP listener thing for
@@ -277,8 +272,6 @@ This configuration file would create a serial thing and a TCP/IP host thing.
 #
 # Global Options
 #
-
-prefork 5
 
 max clients 10
 

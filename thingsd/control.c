@@ -54,10 +54,6 @@ struct ctl_conn {
 #define CTL_CONN_NOTIFY		 0x01
 	struct imsgev		 iev;
 	struct sockpeercred	 peercred;
-
-	/* sockets processes still to answer this conn's list request */
-	int			 pending_sockets;
-	int			 pending_clients;
 };
 TAILQ_HEAD(ctl_connlist, ctl_conn);
 
@@ -86,10 +82,9 @@ __dead void
 	 control_shutdown(void);
 
 __dead void
-control(int fd_parent, int *fd_socks)
+control(int fd_parent, int fd_socks)
 {
 	struct passwd	*pw;
-	int		 n;
 
 	log_procinit("control");
 
@@ -132,12 +127,11 @@ control(int fd_parent, int *fd_socks)
 	imsg_event_init(control_iev_parent, fd_parent,
 	    control_dispatch_thingsd);
 
-	if ((control_iev_socks = calloc(thingsd_env->prefork_socks,
-	    sizeof(*control_iev_socks))) == NULL)
+	if ((control_iev_socks = calloc(1, sizeof(*control_iev_socks)))
+	    == NULL)
 		fatal("%s: calloc", __func__);
-	for (n = 0; n < thingsd_env->prefork_socks; n++)
-		imsg_event_init(&control_iev_socks[n], fd_socks[n],
-		    control_dispatch_sockets);
+	imsg_event_init(control_iev_socks, fd_socks,
+	    control_dispatch_sockets);
 
 	TAILQ_INIT(&ctl_conns);
 	if (control_listen(&control_cs) == -1)
@@ -173,7 +167,6 @@ __dead void
 control_shutdown(void)
 {
 	struct ctl_conn	*c;
-	int		 n;
 
 	control_cleanup(&control_cs);
 
@@ -189,11 +182,9 @@ control_shutdown(void)
 	imsgbuf_clear(&control_iev_parent->ibuf);
 	close(control_iev_parent->ibuf.fd);
 	free(control_iev_parent);
-	for (n = 0; n < thingsd_env->prefork_socks; n++) {
-		event_del(&control_iev_socks[n].ev);
-		imsgbuf_clear(&control_iev_socks[n].ibuf);
-		close(control_iev_socks[n].ibuf.fd);
-	}
+	event_del(&control_iev_socks->ev);
+	imsgbuf_clear(&control_iev_socks->ibuf);
+	close(control_iev_socks->ibuf.fd);
 	free(control_iev_socks);
 
 	log_info("control exiting, pid %d", getpid());
@@ -244,17 +235,6 @@ control_dispatch_sockets(int fd, short event, void *arg)
 				    __func__, imsg.hdr.peerid);
 				break;
 			}
-
-			/*
-			 * Every sockets process answers the request, so the
-			 * end marker is only passed on once all have replied.
-			 */
-			if (imsg.hdr.type == IMSG_GET_INFO_SOCKETS_END_DATA &&
-			    --c->pending_sockets > 0)
-				break;
-			if (imsg.hdr.type == IMSG_GET_INFO_CLIENTS_END_DATA &&
-			    --c->pending_clients > 0)
-				break;
 
 			imsg_compose_event(&c->iev, imsg.hdr.type,
 			    0, 0, -1, imsg.data, IMSG_DATA_SIZE(&imsg));
@@ -647,11 +627,6 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			if (euid == 0 &&
 			    imsg.hdr.type == IMSG_GET_INFO_THINGS_REQUEST)
 				imsg.hdr.type = IMSG_GET_INFO_THINGS_REQUEST_ROOT;
-
-			if (imsg.hdr.type == IMSG_GET_INFO_SOCKETS_REQUEST)
-				c->pending_sockets = thingsd_env->prefork_socks;
-			if (imsg.hdr.type == IMSG_GET_INFO_CLIENTS_REQUEST)
-				c->pending_clients = thingsd_env->prefork_socks;
 
 			if (imsg_forward_event(control_iev_parent,
 			    &imsg) == -1) {

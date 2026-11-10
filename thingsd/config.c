@@ -143,7 +143,7 @@ int
 config_setsocks(struct thingsd *env, struct socket *sock)
 {
 	struct socket_config	 u;
-	int			 fd, n, ret;
+	int			 ret;
 
 	/* setup socket in priv process */
 	if (sockets_privinit(sock) == -1)
@@ -152,39 +152,28 @@ config_setsocks(struct thingsd *env, struct socket *sock)
 	memcpy(&u, &sock->conf, sizeof(u));
 
 	/*
-	 * imsg closes the passed descriptor once sent, so every sockets
-	 * process gets its own dup. The flush is synchronous because the
-	 * parent pledges without sendfd once configuration is finished.
+	 * imsg closes the passed descriptor once it is sent, which also
+	 * keeps listener descriptors from piling up in the parent.  The
+	 * flush is synchronous because the parent pledges without sendfd
+	 * once configuration is finished.
 	 */
-	for (n = 0; n < env->prefork_socks; n++) {
-		if (sock->fd == -1)
-			fd = -1;
-		else if ((fd = dup(sock->fd)) == -1)
-			return (-1);
-		if (imsg_compose(&parent_iev_socks[n].ibuf, IMSG_CFG_SOCKS, 0,
-		    0, fd, &u, sizeof(u)) == -1) {
-			log_warn("%s: failed to compose IMSG_CFG_SOCKS imsg",
-			    __func__);
-			return (-1);
-		}
-		do
-			ret = imsgbuf_flush(&parent_iev_socks[n].ibuf);
-		while (ret == -1 && errno == EAGAIN);
-		if (ret == -1) {
-			log_warn("%s: failed to flush IMSG_CFG_SOCKS imsg",
-			    __func__);
-			return (-1);
-		}
+	if (imsg_compose(&parent_iev_socks->ibuf, IMSG_CFG_SOCKS, 0, 0,
+	    sock->fd, &u, sizeof(u)) == -1) {
+		log_warn("%s: failed to compose IMSG_CFG_SOCKS imsg", __func__);
+		return (-1);
+	}
+	sock->fd = -1;
+	do
+		ret = imsgbuf_flush(&parent_iev_socks->ibuf);
+	while (ret == -1 && errno == EAGAIN);
+	if (ret == -1) {
+		log_warn("%s: failed to flush IMSG_CFG_SOCKS imsg", __func__);
+		return (-1);
 	}
 
 	/* Configure TLS if necessary. */
 	config_setsocks_tls(env, sock);
 
-	/* Close thing socket early to prevent fd exhaustion in thingsd. */
-	if (sock->fd != -1) {
-		close(sock->fd);
-		sock->fd = -1;
-	}
 	return (0);
 }
 
@@ -196,13 +185,12 @@ config_settls(struct thingsd *env, struct socket *sock,
 	struct tls_config	 tls;
 	struct iovec		 iov[2];
 	size_t			 c;
-	int			 n;
 
 	if (data == NULL || len == 0)
 		return (0);
 
-	log_debug("%s: sending tls %s for \"%s[%u]\" to sockets fd %d",
-	    __func__, label, sock_conf->name, sock_conf->id, sock->fd);
+	log_debug("%s: sending tls %s for \"%s[%u]\"", __func__, label,
+	    sock_conf->name, sock_conf->id);
 
 	memset(&tls, 0, sizeof(tls));
 	tls.id = sock_conf->id;
@@ -221,14 +209,11 @@ config_settls(struct thingsd *env, struct socket *sock,
 		iov[c].iov_base = data;
 		iov[c++].iov_len = tls.tls_chunk_len;
 
-		for (n = 0; n < env->prefork_socks; n++) {
-			if (imsg_composev_event(&parent_iev_socks[n],
-			    IMSG_CFG_TLS, 0, 0, -1, iov, c) == -1) {
-				log_warn("%s: failed to compose IMSG_CFG_TLS "
-				    "imsg for `%s'", __func__,
-				    sock_conf->name);
-				return (-1);
-			}
+		if (imsg_composev_event(parent_iev_socks, IMSG_CFG_TLS, 0, 0,
+		    -1, iov, c) == -1) {
+			log_warn("%s: failed to compose IMSG_CFG_TLS imsg for "
+			    "`%s'", __func__, sock_conf->name);
+			return (-1);
 		}
 
 		tls.tls_chunk_offset += tls.tls_chunk_len;

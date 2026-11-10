@@ -153,12 +153,8 @@ config		: /* empty */
 conf_main	: bindopts1
 		| maxclients
 		| PREFORK NUMBER {
-			if ($2 <= 0 || $2 > THINGSD_MAX_PREFORK) {
-				yyerror("invalid number of preforked "
-				    "sockets: %lld", $2);
-				YYERROR;
-			}
-			thingsd->prefork_socks = $2;
+			log_warnx("%s:%d: prefork is deprecated and ignored",
+			    file->name, yylval.lineno);
 		}
 		| thingretry
 		;
@@ -533,11 +529,6 @@ subthings	: THING '{' STRING optcomma STRING '}' {
 			    strlen($5)) != 0)
 				goto done;
 
-			/*
-			 * XXX: the duplicate name and max clients checks
-			 * only see this sockets process, so with prefork
-			 * greater than one they are per process limits.
-			 */
 			TAILQ_FOREACH(tsock, thingsd_env->sockets, entry) {
 				TAILQ_FOREACH(clt, tsock->clients, entry) {
 					if (clt->subscribed && strcmp(clt->name,
@@ -1334,7 +1325,6 @@ parse_config(const char *filename, struct thingsd *env)
 	thingsd = env;
 
 	thingsd->conn_retry = CONN_RETRY;
-	thingsd->prefork_socks = SOCKS_NUMPROC;
 	thingsd->run = 1;
 
 	parsing_pkt = 0;
